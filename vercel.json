@@ -1,10 +1,9 @@
 {
   "version": 2,
-  "functions": {
-    "api/generate_pdf.py": {
-      "maxDuration": 30
-    }
-  },
+  "builds": [
+    { "src": "public/**", "use": "@vercel/static" },
+    { "src": "api/generate_pdf.py", "use": "@vercel/python", "config": { "maxLambdaSize": "50mb" } }
+  ],
   "routes": [
     { "src": "/api/generate-pdf", "dest": "/api/generate_pdf.py" },
     { "src": "/api/generate_pdf", "dest": "/api/generate_pdf.py" },
