@@ -9,6 +9,7 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
+<script src="https://alcdn.msauth.net/browser/2.38.3/js/msal-browser.min.js"></script>
 <script src="config.js"></script>
 <style>
 :root{
@@ -287,7 +288,7 @@ input[type=checkbox]{cursor:pointer;accent-color:var(--cb);}
           <span id="sel-count" class="count-badge" style="background:var(--cb-light);color:var(--cb-dark);display:none;">0 selected</span>
         </div>
         <div style="display:flex;gap:6px;">
-          <button class="btn btn-sm" onclick="syncFromSheets()"><i class="ti ti-cloud-download" aria-hidden="true"></i> Sync sheet</button>
+          <button class="btn btn-sm" onclick="syncFromExcel()"><i class="ti ti-cloud-download" aria-hidden="true"></i> Sync sheet</button>
           <button class="btn btn-sm" onclick="selectAll()"><i class="ti ti-checkbox" aria-hidden="true"></i> Select all</button>
           <button class="btn btn-sm" onclick="clearSel()"><i class="ti ti-square" aria-hidden="true"></i> Clear</button>
           <button class="btn btn-sm btn-primary" onclick="switchView('report')"><i class="ti ti-calculator" aria-hidden="true"></i> Run CMA</button>
@@ -458,47 +459,55 @@ input[type=checkbox]{cursor:pointer;accent-color:var(--cb);}
     <div id="view-settings" class="view content">
       <div class="settings-wrap">
 
+        <!-- Microsoft sign-in card -->
         <div class="settings-card">
           <div class="settings-card-header">
-            <div class="settings-card-icon"><i class="ti ti-brand-google" aria-hidden="true"></i></div>
-            <div class="settings-title">Google OAuth — write back to Sheets</div>
+            <div class="settings-card-icon"><i class="ti ti-brand-windows" aria-hidden="true"></i></div>
+            <div class="settings-title">Microsoft 365 — Colliers account</div>
           </div>
-          <div class="settings-desc">Sign in with Google to allow PropCMA to write edits back to your Google Sheet. Required for the Edit panel to update sheet data. Your OAuth Client ID is entered once here and stored locally.</div>
-          <div class="field">
-            <label>OAuth Client ID</label>
-            <input type="text" id="cfg-oauth-client-id" placeholder="123456789-abc.apps.googleusercontent.com">
-            <span class="field-hint">Google Cloud Console → APIs & Services → Credentials → OAuth 2.0 Client ID</span>
+          <div class="settings-desc">Sign in with your Colliers Microsoft account to sync data from OneDrive and write edits back to the Excel spreadsheet.</div>
+          <div id="ms-signed-out" style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
+            <button class="btn btn-primary" onclick="msSignIn()">
+              <svg width="16" height="16" viewBox="0 0 21 21" style="flex-shrink:0"><rect x="1" y="1" width="9" height="9" fill="#f25022"/><rect x="11" y="1" width="9" height="9" fill="#7fba00"/><rect x="1" y="11" width="9" height="9" fill="#00a4ef"/><rect x="11" y="11" width="9" height="9" fill="#ffb900"/></svg>
+              Sign in with Microsoft
+            </button>
           </div>
-          <div style="display:flex;gap:8px;margin-top:4px;align-items:center;flex-wrap:wrap;">
-            <button class="btn btn-primary" onclick="saveOAuthClientId()"><i class="ti ti-check" aria-hidden="true"></i> Save Client ID</button>
-            <button class="btn oauth-btn" id="oauth-signin-btn" onclick="googleSignIn()" style="display:none;"><i class="ti ti-brand-google" aria-hidden="true"></i> Sign in with Google</button>
-            <button class="btn oauth-btn signed-in" id="oauth-signout-btn" onclick="googleSignOut()" style="display:none;"><i class="ti ti-check" aria-hidden="true"></i> <span id="oauth-user-label">Signed in</span> · Sign out</button>
+          <div id="ms-signed-in" style="display:none;">
+            <div style="display:flex;align-items:center;gap:12px;margin-bottom:12px;">
+              <div id="ms-avatar" style="width:36px;height:36px;border-radius:50%;background:var(--cb);display:flex;align-items:center;justify-content:center;color:#fff;font-size:14px;font-weight:600;flex-shrink:0;"></div>
+              <div>
+                <div id="ms-user-name" style="font-size:13px;font-weight:600;color:var(--ink);"></div>
+                <div id="ms-user-email" style="font-size:11px;color:var(--ink3);"></div>
+              </div>
+              <button class="btn btn-sm btn-danger" onclick="msSignOut()" style="margin-left:auto;"><i class="ti ti-logout" aria-hidden="true"></i> Sign out</button>
+            </div>
+            <div class="status-pill ok" style="display:inline-flex;"><i class="ti ti-check" aria-hidden="true"></i> Signed in — Excel sync and write-back enabled</div>
           </div>
-          <div id="oauth-status" class="status-pill idle" style="display:none;margin-top:10px;"></div>
         </div>
 
+        <!-- Database status -->
         <div class="settings-card">
           <div class="settings-card-header">
             <div class="settings-card-icon"><i class="ti ti-database" aria-hidden="true"></i></div>
             <div class="settings-title">Database status</div>
           </div>
           <div class="db-badge" id="db-badge"><i class="ti ti-loader" aria-hidden="true"></i> Connecting…</div>
-          <p class="settings-desc" style="margin:0;">Settings and property data are stored permanently in Supabase. All team members share the same configuration automatically.</p>
+          <p class="settings-desc" style="margin:0;">Property data is stored permanently in Supabase and shared across your team. The OneDrive Excel file is the source of truth — sync pulls the latest data.</p>
         </div>
 
+        <!-- Street View thumbnails -->
         <div class="settings-card">
           <div class="settings-card-header">
             <div class="settings-card-icon"><i class="ti ti-camera" aria-hidden="true"></i></div>
             <div class="settings-title">Street View thumbnails</div>
           </div>
-          <div class="settings-desc">Shows a small Street View photo next to each property address. Requires a Google Maps API key with the <strong>Street View Static API</strong> enabled. Stored locally — never sent anywhere except directly to Google.</div>
+          <div class="settings-desc">Shows a small Street View photo next to each address. Requires a Google Maps API key with the Street View Static API enabled. Stored locally in your browser only.</div>
           <div class="field">
             <label>Google Maps API Key</label>
             <div class="key-wrap">
               <input type="password" id="cfg-gmaps-key" placeholder="AIza…">
               <button class="key-toggle" onclick="toggleKeyVis('cfg-gmaps-key',this)" aria-label="Toggle visibility"><i class="ti ti-eye" aria-hidden="true"></i></button>
             </div>
-            <span class="field-hint">Console → APIs & Services → Credentials. Restrict the key to Street View Static API.</span>
           </div>
           <div style="display:flex;gap:8px;margin-top:4px;">
             <button class="btn btn-primary" onclick="saveGmapsKey()"><i class="ti ti-check" aria-hidden="true"></i> Save key</button>
@@ -507,56 +516,30 @@ input[type=checkbox]{cursor:pointer;accent-color:var(--cb);}
           <div id="gmaps-status" class="status-pill idle" style="display:none;"></div>
         </div>
 
-        <div class="settings-card">
+        <!-- Excel sync -->
+        <div class="settings-card" id="sync-card">
           <div class="settings-card-header">
-            <div class="settings-card-icon"><i class="ti ti-plug" aria-hidden="true"></i></div>
-            <div class="settings-title">Google Sheets connection</div>
+            <div class="settings-card-icon"><i class="ti ti-cloud-download" aria-hidden="true"></i></div>
+            <div class="settings-title">OneDrive Excel sync</div>
           </div>
-          <div class="settings-desc">Saved permanently to your shared database — enter once, works for everyone on your team.</div>
-          <div class="field">
-            <label>API Key</label>
-            <div class="key-wrap">
-              <input type="password" id="cfg-api-key" placeholder="AIza…">
-              <button class="key-toggle" onclick="toggleKeyVis('cfg-api-key',this)" aria-label="Toggle visibility"><i class="ti ti-eye" aria-hidden="true"></i></button>
-            </div>
+          <div class="settings-desc">Pulls the latest data from your Colliers OneDrive Excel file into the shared database. Sign in above first.</div>
+          <div style="display:flex;gap:8px;">
+            <button class="btn btn-primary" onclick="syncFromExcel()"><i class="ti ti-cloud-download" aria-hidden="true"></i> Sync now</button>
+            <button class="btn btn-danger" onclick="clearAllData()"><i class="ti ti-trash" aria-hidden="true"></i> Clear all data</button>
           </div>
-          <div class="field">
-            <label>Sheet ID</label>
-            <input type="text" id="cfg-sheet-id" placeholder="1BxiMVs0XRA5nFMdKvBdBZjgmUUqptlbs74OgVE2upms">
-            <span class="field-hint">From your Sheet URL: docs.google.com/spreadsheets/d/<strong>[Sheet ID]</strong>/edit</span>
-          </div>
-          <div class="field">
-            <label>Sheet tab name</label>
-            <input type="text" id="cfg-sheet-tab" placeholder="Sheet1">
-          </div>
-          <div style="display:flex;gap:8px;margin-top:4px;">
-            <button class="btn btn-primary" onclick="saveAndTest()"><i class="ti ti-plug" aria-hidden="true"></i> Save & test connection</button>
-          </div>
-          <div id="conn-status" class="status-pill idle" style="display:none;"></div>
+          <div id="last-sync-label" style="font-size:11px;color:var(--ink3);margin-top:8px;"></div>
         </div>
 
+        <!-- Column mapping -->
         <div class="settings-card" id="col-map-card" style="display:none;">
           <div class="settings-card-header">
             <div class="settings-card-icon"><i class="ti ti-arrows-exchange" aria-hidden="true"></i></div>
             <div class="settings-title">Column mapping</div>
           </div>
-          <div class="settings-desc">Map your sheet columns to PropCMA fields. The 4 broker columns are combined automatically into one Broker field, separated by semicolons. Saved to database — applies for all teammates.</div>
+          <div class="settings-desc">Map your Excel columns to PropCMA fields. Saved to the database — applies for all teammates.</div>
           <div id="col-map-rows"></div>
           <hr style="border:none;border-top:var(--border);margin:14px 0;">
-          <button class="btn btn-primary" onclick="saveColMap()"><i class="ti ti-check" aria-hidden="true"></i> Save mapping & sync data</button>
-        </div>
-
-        <div class="settings-card" id="sync-card" style="display:none;">
-          <div class="settings-card-header">
-            <div class="settings-card-icon"><i class="ti ti-cloud-download" aria-hidden="true"></i></div>
-            <div class="settings-title">Data sync</div>
-          </div>
-          <div class="settings-desc">Pulls latest data from Google Sheets into the shared database. Anyone who syncs updates the data for the whole team.</div>
-          <div style="display:flex;gap:8px;">
-            <button class="btn btn-primary" onclick="syncFromSheets()"><i class="ti ti-cloud-download" aria-hidden="true"></i> Sync now</button>
-            <button class="btn btn-danger" onclick="clearAllData()"><i class="ti ti-trash" aria-hidden="true"></i> Clear all data</button>
-          </div>
-          <div id="last-sync-label" style="font-size:11px;color:var(--ink3);margin-top:8px;"></div>
+          <button class="btn btn-primary" onclick="saveColMap()"><i class="ti ti-check" aria-hidden="true"></i> Save mapping & sync</button>
         </div>
 
       </div>
@@ -626,11 +609,11 @@ input[type=checkbox]{cursor:pointer;accent-color:var(--cb);}
     <button class="btn btn-sm" onclick="addPhotoRow()" style="margin-bottom:10px;"><i class="ti ti-plus" aria-hidden="true"></i> Add photo URL</button>
     <div class="photo-previews" id="so-photo-previews"></div>
 
-    <!-- Sheets sync status -->
+    <!-- Excel sync status -->
     <div id="so-sheets-status" style="margin-top:16px;display:none;">
       <div style="font-size:11px;color:var(--ink3);background:var(--paper2);padding:8px 10px;border-radius:var(--radius);border:var(--border);">
         <i class="ti ti-info-circle" aria-hidden="true"></i>
-        Edits will be saved to Supabase. To write back to Google Sheets, sign in with Google in Settings → Google OAuth.
+        Edits saved to Supabase. Sign in with your Colliers Microsoft account in Settings to also write back to the Excel file.
       </div>
     </div>
   </div>
@@ -645,11 +628,35 @@ input[type=checkbox]{cursor:pointer;accent-color:var(--cb);}
 // ── Supabase client ──────────────────────────────────────────
 const sb = supabase.createClient(window.SUPABASE_URL, window.SUPABASE_ANON);
 
+// ── Microsoft / MSAL configuration ──────────────────────────
+const MS_CLIENT_ID = 'e41d7680-86d8-49a0-8a68-17a5f166e10b';
+const MS_TENANT_ID = 'eb16ec4a-f2aa-404f-b306-b391df9df367';
+// SharePoint/OneDrive Excel file URL — encoded for Graph API path lookup
+const EXCEL_URL    = 'https://cjch.sharepoint.com/sites/BrokerToolKit/Shared Documents/PropCMA/propcma/public/Sales Data Colliers.xlsx';
+const EXCEL_SHEET  = 'Sheet1'; // tab name inside the Excel file
+
+const msalApp = new msal.PublicClientApplication({
+  auth:{
+    clientId: MS_CLIENT_ID,
+    authority: `https://login.microsoftonline.com/${MS_TENANT_ID}`,
+    redirectUri: window.location.origin,
+  },
+  cache:{
+    cacheLocation: 'localStorage',       // persist across sessions
+    storeAuthStateInCookie: true,        // IE11 / cross-tab fallback
+  },
+});
+
+const MS_SCOPES = ['User.Read','Files.ReadWrite','Sites.ReadWrite.All'];
+
+let msAccount  = null;   // current signed-in account
+let msToken    = null;   // current access token
+
 // ── State ────────────────────────────────────────────────────
 let allProperties=[],filtered=[],selected=new Set();
 let sortCol='saleDateTs',sortDir=-1;
 let pendingRows=[],pendingHeaders=[],columnMap={};
-let cfg={apiKey:'',sheetId:'',sheetTab:'Sheet1',colMap:{}};
+let cfg={colMap:{}};  // column mapping saved to Supabase
 let gmapsKey='';
 
 // Regular fields map 1:1. Broker is special — combines 4 source columns.
@@ -713,20 +720,20 @@ function parseDate(raw){
   const d=new Date(s);return isNaN(d)?null:d.getTime();
 }
 
-// ── Supabase: settings ─────────────────────────────────────────
+// ── Supabase: settings (col mapping only now) ──────────────────
 async function loadCfg(){
   try{
-    const{data,error}=await sb.from('app_settings').select('*').eq('id','singleton').single();
+    const{data,error}=await sb.from('app_settings').select('col_map').eq('id','singleton').single();
     if(error)throw error;
-    if(data){cfg.apiKey=data.api_key||'';cfg.sheetId=data.sheet_id||'';cfg.sheetTab=data.sheet_tab||'Sheet1';cfg.colMap=data.col_map||{};}
+    if(data)cfg.colMap=data.col_map||{};
   }catch(e){console.warn('Settings load:',e);}
-  document.getElementById('cfg-api-key').value=cfg.apiKey;
-  document.getElementById('cfg-sheet-id').value=cfg.sheetId;
-  document.getElementById('cfg-sheet-tab').value=cfg.sheetTab||'Sheet1';
-  if(cfg.apiKey&&cfg.sheetId){setSyncState('ok','Connected');showColMapCard();document.getElementById('sync-card').style.display='';}
+  // Show col-map card if we have a mapping saved
+  if(Object.keys(cfg.colMap).length)showColMapCard();
 }
 async function saveCfg(){
-  const{error}=await sb.from('app_settings').upsert({id:'singleton',api_key:cfg.apiKey,sheet_id:cfg.sheetId,sheet_tab:cfg.sheetTab,col_map:cfg.colMap,updated_at:new Date().toISOString()});
+  const{error}=await sb.from('app_settings').upsert({
+    id:'singleton', col_map:cfg.colMap, updated_at:new Date().toISOString()
+  });
   if(error)showToast('Error saving settings: '+error.message);
 }
 
@@ -779,24 +786,350 @@ function dbToApp(r){
 // ── Init ──────────────────────────────────────────────────────
 async function init(){
   setLoading('Connecting to database…');
+  // Handle MSAL redirect response first (after sign-in redirect)
+  try{ await msalApp.handleRedirectPromise(); }catch(e){}
+
+  // Check if already signed in
+  const accounts=msalApp.getAllAccounts();
+  if(accounts.length){
+    msAccount=accounts[0];
+    await refreshMsToken();
+    updateMsUI();
+  }
+
   try{
     const{error}=await sb.from('app_settings').select('id').limit(1);
     if(error)throw error;
     document.getElementById('db-badge').innerHTML='<i class="ti ti-check" aria-hidden="true"></i> Connected to Supabase';
-    document.getElementById('db-badge').style.background='#dcfce7';document.getElementById('db-badge').style.color='#166534';
+    document.getElementById('db-badge').style.background='#dcfce7';
+    document.getElementById('db-badge').style.color='#166534';
   }catch(e){
     document.getElementById('db-badge').innerHTML='<i class="ti ti-x" aria-hidden="true"></i> Database error — check config.js';
-    document.getElementById('db-badge').style.background='#fef2f2';document.getElementById('db-badge').style.color='#991b1b';
+    document.getElementById('db-badge').style.background='#fef2f2';
+    document.getElementById('db-badge').style.color='#991b1b';
   }
-  setLoading('Loading settings…');await loadCfg();
+  setLoading('Loading settings…');
+  await loadCfg();
   loadGmapsKey();
-  loadOAuthClientId();
-  setLoading('Loading properties…');await loadProperties();
+  setLoading('Loading properties…');
+  await loadProperties();
   hideLoading();
   initSortableHeaders();
 }
 function setLoading(msg){document.getElementById('loading-text').textContent=msg;}
 function hideLoading(){const ol=document.getElementById('loading-overlay');ol.classList.add('hidden');setTimeout(()=>ol.style.display='none',400);}
+
+// ── MSAL sign-in / sign-out ───────────────────────────────────
+async function msSignIn(){
+  try{
+    // Try silent first (uses cached token from localStorage)
+    msAccount=msalApp.getAllAccounts()[0]||null;
+    if(msAccount){
+      await refreshMsToken();
+      updateMsUI();
+      showToast('Signed in as '+msAccount.name);
+      return;
+    }
+    // Fall back to popup
+    const result=await msalApp.loginPopup({scopes:MS_SCOPES,prompt:'select_account'});
+    msAccount=result.account;
+    msToken=result.accessToken;
+    updateMsUI();
+    showToast('Signed in as '+msAccount.name);
+  }catch(e){
+    if(e.errorCode==='user_cancelled')return;
+    showToast('Sign-in failed: '+e.message);
+  }
+}
+
+async function msSignOut(){
+  if(!msAccount)return;
+  try{
+    await msalApp.logoutPopup({account:msAccount});
+  }catch(e){}
+  msAccount=null;msToken=null;
+  updateMsUI();
+  showToast('Signed out');
+}
+
+async function refreshMsToken(){
+  if(!msAccount)return null;
+  try{
+    const result=await msalApp.acquireTokenSilent({scopes:MS_SCOPES,account:msAccount});
+    msToken=result.accessToken;
+    msAccount=result.account;
+    return msToken;
+  }catch(e){
+    // Silent failed — token expired, need interaction
+    try{
+      const result=await msalApp.acquireTokenPopup({scopes:MS_SCOPES,account:msAccount});
+      msToken=result.accessToken;
+      return msToken;
+    }catch(e2){
+      msToken=null;
+      return null;
+    }
+  }
+}
+
+function updateMsUI(){
+  const signedIn=!!msAccount;
+  document.getElementById('ms-signed-out').style.display=signedIn?'none':'flex';
+  document.getElementById('ms-signed-in').style.display=signedIn?'':'none';
+  if(signedIn){
+    const name=msAccount.name||msAccount.username||'';
+    const email=msAccount.username||'';
+    document.getElementById('ms-user-name').textContent=name;
+    document.getElementById('ms-user-email').textContent=email;
+    // Avatar initials
+    const initials=name.split(' ').map(w=>w[0]||'').slice(0,2).join('').toUpperCase();
+    document.getElementById('ms-avatar').textContent=initials;
+    setSyncState('ok','Signed in — '+name.split(' ')[0]);
+  }else{
+    setSyncState('','Not signed in');
+  }
+}
+
+// ── Microsoft Graph helpers ───────────────────────────────────
+async function graphGet(path){
+  const token=await refreshMsToken();
+  if(!token)throw new Error('Not signed in to Microsoft');
+  const res=await fetch('https://graph.microsoft.com/v1.0'+path,{
+    headers:{'Authorization':'Bearer '+token,'Content-Type':'application/json'},
+  });
+  if(!res.ok){const e=await res.json().catch(()=>({}));throw new Error(e?.error?.message||'Graph error '+res.status);}
+  return res.json();
+}
+
+async function graphPatch(path,body){
+  const token=await refreshMsToken();
+  if(!token)throw new Error('Not signed in to Microsoft');
+  const res=await fetch('https://graph.microsoft.com/v1.0'+path,{
+    method:'PATCH',
+    headers:{'Authorization':'Bearer '+token,'Content-Type':'application/json'},
+    body:JSON.stringify(body),
+  });
+  if(!res.ok){const e=await res.json().catch(()=>({}));throw new Error(e?.error?.message||'Graph error '+res.status);}
+  return res.json().catch(()=>({}));
+}
+
+// Convert our SharePoint URL to a Graph drive item path
+// Format: /sites/{hostname}:/sites/{site}:/drive/root:/{file-path}
+function getGraphExcelPath(){
+  // Parse: https://cjch.sharepoint.com/sites/BrokerToolKit/Shared Documents/...
+  const url=new URL(EXCEL_URL);
+  const host=url.hostname; // cjch.sharepoint.com
+  const parts=url.pathname.split('/').filter(Boolean);
+  // parts: ['sites','BrokerToolKit','Shared Documents','PropCMA','propcma','public','Sales Data Colliers.xlsx']
+  const siteIdx=parts.indexOf('sites');
+  const siteName=parts[siteIdx+1];
+  const filePath=parts.slice(siteIdx+2).join('/');
+  return {
+    siteUrl:`https://graph.microsoft.com/v1.0/sites/${host}:/sites/${siteName}`,
+    filePath:filePath,
+  };
+}
+
+async function getExcelDriveItemId(){
+  const{siteUrl,filePath}=getGraphExcelPath();
+  // Get site drives then find the file
+  const site=await graphGet(`/sites/${getGraphExcelPath().siteUrl.split('/v1.0/')[1]}`).catch(()=>null);
+  // Simpler: use the encoded share URL approach via /shares
+  // Encode the file URL as a sharing link
+  const encoded='u!'+btoa(EXCEL_URL).replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,'');
+  const driveItem=await graphGet(`/shares/${encoded}/driveItem`);
+  return{driveId:driveItem.parentReference?.driveId,itemId:driveItem.id};
+}
+
+// ── Sync from OneDrive Excel ──────────────────────────────────
+async function syncFromExcel(){
+  if(!msToken&&!msAccount){showToast('Sign in with your Colliers account first');switchView('settings');return;}
+  setSyncState('loading','Syncing from Excel…');
+  try{
+    // Get the drive item for our Excel file
+    const encoded='u!'+btoa(EXCEL_URL).replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,'');
+    const driveItem=await graphGet(`/shares/${encoded}/driveItem`);
+    const driveId=driveItem.parentReference?.driveId;
+    const itemId=driveItem.id;
+
+    // Read the used range from the worksheet
+    const rangeData=await graphGet(
+      `/drives/${driveId}/items/${itemId}/workbook/worksheets/${encodeURIComponent(EXCEL_SHEET)}/usedRange`
+    );
+
+    const values=rangeData.values||[];
+    if(values.length<2){setSyncState('ok','Sheet empty');showToast('Excel sheet has no data rows');return;}
+
+    const headers=values[0].map(String);
+
+    // Auto-map columns if we don't have a mapping yet
+    if(!Object.keys(cfg.colMap).length){
+      autoMapColumns(headers);
+      showColMapCard(headers);
+      await saveCfg();
+    }
+
+    // Build colIdx from saved mapping
+    const colIdx={};
+    [...FIELDS,...BROKER_FIELDS].forEach(f=>{
+      const mapped=cfg.colMap[f.key];
+      if(mapped){const i=headers.findIndex(h=>h===mapped);if(i>=0)colIdx[f.key]=i;}
+    });
+
+    const newProps=values.slice(1).map((row,i)=>{
+      const p={id:'xl_'+(i+2),_rowNum:i+2};
+      FIELDS.forEach(f=>{
+        const ci=colIdx[f.key];if(ci===undefined||ci>=row.length)return;
+        let v=String(row[ci]??'').trim();if(!v||v==='null')return;
+        if(f.key==='sqm'||f.key==='pricePerSqm'||f.key==='salePrice')v=parseFloat(v.replace(/[^0-9.]/g,''))||null;
+        else if(f.key==='auction')v=/yes|true|1|y/i.test(v);
+        p[f.key]=v;
+      });
+      BROKER_FIELDS.forEach(b=>{
+        const ci=colIdx[b.key];if(ci===undefined||ci>=row.length)return;
+        const v=String(row[ci]??'').trim();if(v&&v!=='null')p[b.key]=v;
+      });
+      p.broker=combineBrokers(p);
+      BROKER_FIELDS.forEach(b=>delete p[b.key]);
+      if(p.sqm&&p.salePrice&&!p.pricePerSqm)p.pricePerSqm=p.salePrice/p.sqm;
+      if(p.sqm&&p.pricePerSqm&&!p.salePrice)p.salePrice=p.sqm*p.pricePerSqm;
+      p.saleDateTs=parseDate(p.saleDate);
+      return p;
+    }).filter(p=>p.address||p.saleDate);
+
+    // Store drive/item IDs in cfg for write-back
+    cfg._driveId=driveId;
+    cfg._itemId=itemId;
+    cfg._headers=headers;
+
+    // Clear old xl_ rows and save fresh
+    await sb.from('properties').delete().like('id','xl_%');
+    await saveProperties(newProps);
+    allProperties=newProps;
+
+    const now=new Date().toLocaleTimeString('en-NZ',{hour:'2-digit',minute:'2-digit'});
+    setSyncState('ok',`Synced · ${allProperties.length} · ${now}`);
+    document.getElementById('last-sync-label').textContent=
+      `Last synced: ${now} — ${allProperties.length} records from Excel`;
+    applyFilters();
+    showToast(`${allProperties.length} properties synced from Excel`);
+  }catch(e){
+    setSyncState('err','Sync error');
+    showToast('Sync failed: '+e.message);
+    console.error(e);
+  }
+}
+
+// ── Write property edits back to Excel ────────────────────────
+const EXCEL_EDIT_COLS={
+  'SQM':            p=>p.sqm!=null?String(p.sqm):'',
+  'Land Area (SQM)':p=>p.landArea!=null?String(p.landArea):'',
+  'Annual Rent ($)':p=>p.annualRent!=null?String(p.annualRent):'',
+  'Initial Yield (%)':p=>p.initialYield!=null?String(p.initialYield):'',
+  'Notes':          p=>p.notes||'',
+  'Photos':         p=>p.photos||'',
+};
+
+async function writePropertyToExcel(prop){
+  if(!msToken||!cfg._driveId||!cfg._itemId){
+    document.getElementById('so-sheets-status').style.display='';
+    return false;
+  }
+  try{
+    let headers=cfg._headers;
+    // Ensure edit columns exist in the sheet
+    const needed=Object.keys(EXCEL_EDIT_COLS).filter(c=>!headers.includes(c));
+    if(needed.length){
+      const newHeaders=[...headers,...needed];
+      const range=`${EXCEL_SHEET}!A1:${colLetter(newHeaders.length-1)}1`;
+      await graphPatch(
+        `/drives/${cfg._driveId}/items/${cfg._itemId}/workbook/worksheets/${encodeURIComponent(EXCEL_SHEET)}/range(address='${range}')`,
+        {values:[newHeaders]}
+      );
+      cfg._headers=newHeaders;
+      headers=newHeaders;
+    }
+
+    // Row number from prop id: xl_N → N
+    const rowNum=parseInt((prop.id||'').replace('xl_',''));
+    if(isNaN(rowNum)||rowNum<2)return false;
+
+    // Write each edit column individually
+    const writes=Object.entries(EXCEL_EDIT_COLS).map(([colName,getter])=>{
+      const ci=headers.indexOf(colName);
+      if(ci<0)return Promise.resolve();
+      const cellAddr=`${EXCEL_SHEET}!${colLetter(ci)}${rowNum}`;
+      return graphPatch(
+        `/drives/${cfg._driveId}/items/${cfg._itemId}/workbook/worksheets/${encodeURIComponent(EXCEL_SHEET)}/range(address='${cellAddr}')`,
+        {values:[[getter(prop)]]}
+      );
+    });
+    await Promise.all(writes);
+    return true;
+  }catch(e){
+    console.error('Excel write error:',e);
+    return false;
+  }
+}
+
+function colLetter(idx){
+  let letter='';idx+=1;
+  while(idx>0){const rem=(idx-1)%26;letter=String.fromCharCode(65+rem)+letter;idx=Math.floor((idx-1)/26);}
+  return letter;
+}
+
+// ── Settings UI helpers ───────────────────────────────────────
+function setSyncState(st,lbl){
+  document.getElementById('sync-dot').className='sync-dot '+(st||'');
+  document.getElementById('sync-label').textContent=lbl;
+}
+function toggleKeyVis(id,btn){
+  const i=document.getElementById(id);const s=i.type==='password';
+  i.type=s?'text':'password';
+  btn.innerHTML=s?'<i class="ti ti-eye-off"></i>':'<i class="ti ti-eye"></i>';
+}
+
+function autoMapColumns(h){
+  cfg.colMap={};
+  FIELDS.forEach(f=>{
+    const i=h.findIndex(x=>{const xl=x.toLowerCase().replace(/[\s\/\-_]/g,'');
+      return xl.includes(f.key.toLowerCase())||f.label.toLowerCase().split(' ').some(w=>w.length>2&&xl.includes(w.toLowerCase()));});
+    cfg.colMap[f.key]=i>=0?h[i]:'';
+  });
+  BROKER_FIELDS.forEach((b,idx)=>{
+    const num=idx+1;
+    const i=h.findIndex(x=>{const xl=x.toLowerCase().replace(/[\s_\-]/g,'');
+      return xl===`broker${num}`||xl===`broker0${num}`;});
+    cfg.colMap[b.key]=i>=0?h[i]:'';
+  });
+}
+
+function showColMapCard(headers){
+  document.getElementById('col-map-card').style.display='';
+  const wrap=document.getElementById('col-map-rows');
+  if(!headers){
+    // Headers already in cfg._headers from sync, or fetch again
+    if(cfg._headers){buildColMapUI(cfg._headers,wrap);}
+    return;
+  }
+  buildColMapUI(headers,wrap);
+}
+
+function buildColMapUI(h,wrap){
+  const optsFor=cv=>['<option value="">— skip —</option>',...h.map(x=>`<option value="${x.replace(/"/g,'&quot;')}" ${x===cv?'selected':''}>${x}</option>`)].join('');
+  let html=FIELDS.map(f=>{
+    const cv=cfg.colMap[f.key]||'';
+    return `<div class="col-map-grid"><span class="col-map-label">${f.label}</span><span style="color:var(--ink3);text-align:center;">→</span><select onchange="cfg.colMap['${f.key}']=this.value">${optsFor(cv)}</select></div>`;
+  }).join('');
+  html+=`<div class="mapper-note"><i class="ti ti-info-circle" aria-hidden="true"></i> The 4 fields below are combined into one "Broker" column, separated by semicolons.</div>`;
+  html+=BROKER_FIELDS.map(b=>{
+    const cv=cfg.colMap[b.key]||'';
+    return `<div class="col-map-grid"><span class="col-map-label">${b.label}</span><span style="color:var(--ink3);text-align:center;">→</span><select onchange="cfg.colMap['${b.key}']=this.value">${optsFor(cv)}</select></div>`;
+  }).join('');
+  wrap.innerHTML=html;
+}
+
+async function saveColMap(){await saveCfg();showToast('Mapping saved');syncFromExcel();}
 
 // ── Street View key (stored locally per-browser) ───────────────
 function loadGmapsKey(){
@@ -821,114 +1154,6 @@ function clearGmapsKey(){
   document.getElementById('gmaps-status').style.display='none';
   renderTable();
   showToast('Street View key removed');
-}
-
-// ── Settings UI ───────────────────────────────────────────────
-function setSyncState(st,lbl){document.getElementById('sync-dot').className='sync-dot '+st;document.getElementById('sync-label').textContent=lbl;}
-function toggleKeyVis(id,btn){const i=document.getElementById(id);const s=i.type==='password';i.type=s?'text':'password';btn.innerHTML=s?'<i class="ti ti-eye-off"></i>':'<i class="ti ti-eye"></i>';}
-
-async function saveAndTest(){
-  const key=document.getElementById('cfg-api-key').value.trim();
-  const id= document.getElementById('cfg-sheet-id').value.trim();
-  const tab=document.getElementById('cfg-sheet-tab').value.trim()||'Sheet1';
-  if(!key||!id){showToast('Please enter both API key and Sheet ID');return;}
-  cfg.apiKey=key;cfg.sheetId=id;cfg.sheetTab=tab;
-  const st=document.getElementById('conn-status');st.style.display='inline-flex';st.className='status-pill idle';st.innerHTML='Testing…';setSyncState('loading','Testing…');
-  try{
-    const res=await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${id}/values/${encodeURIComponent(tab+'!1:1')}?key=${key}`);
-    if(!res.ok){const e=await res.json().catch(()=>({}));st.className='status-pill err';st.innerHTML='<i class="ti ti-x"></i> '+(e?.error?.message||'HTTP '+res.status);setSyncState('err','Failed');return;}
-    const data=await res.json();const headers=(data.values?.[0]||[]).map(String);
-    if(!headers.length){st.className='status-pill err';st.innerHTML='Sheet appears empty — check tab name';setSyncState('err','Empty');return;}
-    st.className='status-pill ok';st.innerHTML=`<i class="ti ti-check"></i> Connected — ${headers.length} columns detected`;setSyncState('ok','Connected');
-    document.getElementById('sync-card').style.display='';
-    autoMapColumns(headers);showColMapCard(headers);
-    await saveCfg();
-    showToast('Settings saved to database — your team can use these immediately');
-  }catch(e){st.className='status-pill err';st.innerHTML='Network error';setSyncState('err','Error');}
-}
-
-function autoMapColumns(h){
-  cfg.colMap={};
-  // Regular fields
-  FIELDS.forEach(f=>{
-    const i=h.findIndex(x=>{const xl=x.toLowerCase().replace(/[\s\/\-_]/g,'');return xl.includes(f.key.toLowerCase())||f.label.toLowerCase().split(' ').some(w=>w.length>2&&xl.includes(w.toLowerCase()));});
-    cfg.colMap[f.key]=i>=0?h[i]:'';
-  });
-  // Broker fields — match "broker 1", "broker1", etc.
-  BROKER_FIELDS.forEach((b,idx)=>{
-    const num=idx+1;
-    const i=h.findIndex(x=>{const xl=x.toLowerCase().replace(/[\s_\-]/g,'');return xl===`broker${num}`||xl===`broker0${num}`;});
-    cfg.colMap[b.key]=i>=0?h[i]:'';
-  });
-}
-
-function showColMapCard(headers){
-  document.getElementById('col-map-card').style.display='';
-  const wrap=document.getElementById('col-map-rows');
-  if(!headers){fetch(`https://sheets.googleapis.com/v4/spreadsheets/${cfg.sheetId}/values/${encodeURIComponent(cfg.sheetTab+'!1:1')}?key=${cfg.apiKey}`).then(r=>r.json()).then(d=>buildColMapUI(d.values?.[0]||[],wrap)).catch(()=>{});return;}
-  buildColMapUI(headers,wrap);
-}
-
-function buildColMapUI(h,wrap){
-  const optsFor=cv=>['<option value="">— skip —</option>',...h.map(x=>`<option value="${x.replace(/"/g,'&quot;')}" ${x===cv?'selected':''}>${x}</option>`)].join('');
-  let html=FIELDS.map(f=>{
-    const cv=cfg.colMap[f.key]||'';
-    return `<div class="col-map-grid"><span class="col-map-label">${f.label}</span><span style="color:var(--ink3);text-align:center;">→</span><select onchange="cfg.colMap['${f.key}']=this.value">${optsFor(cv)}</select></div>`;
-  }).join('');
-  html+=`<div class="mapper-note"><i class="ti ti-info-circle" aria-hidden="true"></i> The 4 fields below are combined into one "Broker" column, separated by semicolons.</div>`;
-  html+=BROKER_FIELDS.map(b=>{
-    const cv=cfg.colMap[b.key]||'';
-    return `<div class="col-map-grid"><span class="col-map-label">${b.label}</span><span style="color:var(--ink3);text-align:center;">→</span><select onchange="cfg.colMap['${b.key}']=this.value">${optsFor(cv)}</select></div>`;
-  }).join('');
-  wrap.innerHTML=html;
-}
-
-async function saveColMap(){await saveCfg();showToast('Mapping saved');syncFromSheets();}
-
-// ── Google Sheets sync ────────────────────────────────────────
-async function syncFromSheets(){
-  if(!cfg.apiKey||!cfg.sheetId){showToast('No Google Sheet connected — check Settings');switchView('settings');return;}
-  setSyncState('loading','Syncing…');
-  try{
-    const res=await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${cfg.sheetId}/values/${encodeURIComponent(cfg.sheetTab)}?key=${cfg.apiKey}`);
-    if(!res.ok){setSyncState('err','Sync failed');showToast('Sync failed');return;}
-    const data=await res.json();const rows=data.values||[];
-    if(rows.length<2){setSyncState('ok','Sheet empty');showToast('Sheet has no data rows');return;}
-    const headers=rows[0].map(String);
-    const colIdx={};
-    [...FIELDS,...BROKER_FIELDS].forEach(f=>{const mapped=cfg.colMap[f.key];if(mapped){const i=headers.findIndex(h=>h===mapped);if(i>=0)colIdx[f.key]=i;}});
-
-    const newProps=rows.slice(1).map((row,i)=>{
-      const p={id:'gs_'+(i+2)};
-      FIELDS.forEach(f=>{
-        const ci=colIdx[f.key];if(ci===undefined||ci>=row.length)return;
-        let v=(row[ci]||'').toString().trim();if(!v)return;
-        if(f.key==='sqm'||f.key==='pricePerSqm'||f.key==='salePrice')v=parseFloat(v.replace(/[^0-9.]/g,''))||null;
-        else if(f.key==='auction')v=/yes|true|1|y/i.test(v);
-        p[f.key]=v;
-      });
-      // Combine broker columns
-      BROKER_FIELDS.forEach(b=>{
-        const ci=colIdx[b.key];if(ci===undefined||ci>=row.length)return;
-        const v=(row[ci]||'').toString().trim();if(v)p[b.key]=v;
-      });
-      p.broker=combineBrokers(p);
-      BROKER_FIELDS.forEach(b=>delete p[b.key]); // don't keep raw broker1..4 on the object
-
-      if(p.sqm&&p.salePrice&&!p.pricePerSqm)p.pricePerSqm=p.salePrice/p.sqm;
-      if(p.sqm&&p.pricePerSqm&&!p.salePrice)p.salePrice=p.sqm*p.pricePerSqm;
-      p.saleDateTs=parseDate(p.saleDate);
-      return p;
-    }).filter(p=>p.address||p.saleDate);
-
-    await sb.from('properties').delete().like('id','gs_%');
-    await saveProperties(newProps);
-    allProperties=newProps;
-    const now=new Date().toLocaleTimeString('en-NZ',{hour:'2-digit',minute:'2-digit'});
-    setSyncState('ok',`Synced · ${allProperties.length} · ${now}`);
-    document.getElementById('last-sync-label').textContent=`Last synced: ${now} — ${allProperties.length} records`;
-    applyFilters();showToast(`${allProperties.length} properties synced to database`);
-  }catch(e){setSyncState('err','Error');showToast('Sync error: '+e.message);}
 }
 
 // ── Chip filters ──────────────────────────────────────────────
@@ -1012,7 +1237,7 @@ function updateSortIcons(){
 function renderTable(){
   const body=document.getElementById('prop-body'),table=document.getElementById('prop-table'),empty=document.getElementById('empty-state');
   document.getElementById('prop-count').textContent=filtered.length+' propert'+(filtered.length===1?'y':'ies');
-  if(!filtered.length){table.style.display='none';empty.style.display='flex';document.getElementById('empty-msg').textContent=allProperties.length?'No properties match the current filters.':cfg.apiKey?'Click "Sync sheet" to load your data.':'Configure your Google Sheet in Settings, then sync.';return;}
+  if(!filtered.length){table.style.display='none';empty.style.display='flex';document.getElementById('empty-msg').textContent=allProperties.length?'No properties match the current filters.':msToken?'Click "Sync now" in Settings to load your data.':'Sign in with your Colliers Microsoft account in Settings to sync data.';return;}
   table.style.display='';empty.style.display='none';
   body.innerHTML=filtered.map(p=>{
     const chk=selected.has(p.id)?'checked':'',sc=selected.has(p.id)?'selected':'';
@@ -1254,161 +1479,6 @@ function fmtNum(n){if(n==null||isNaN(n))return'—';return Number(n).toLocaleStr
 function fmtPrice(n){if(!n||isNaN(n))return'—';if(n>=1e6)return(n/1e6).toFixed(2).replace(/\.?0+$/,'')+'M';if(n>=1e3)return(n/1e3).toFixed(0)+'k';return String(Math.round(n));}
 function showToast(msg){const t=document.getElementById('toast');t.textContent=msg;t.classList.add('show');setTimeout(()=>t.classList.remove('show'),2800);}
 
-// ── OAuth + Google Identity Services ─────────────────────────
-let oauthClientId='';
-let gisInited=false;
-let tokenClient=null;
-let accessToken=null;
-let oauthUserEmail='';
-
-function loadGisScript(){
-  if(document.getElementById('gis-script'))return;
-  const s=document.createElement('script');
-  s.id='gis-script';
-  s.src='https://accounts.google.com/gsi/client';
-  s.async=true;s.defer=true;
-  s.onload=()=>{gisInited=true;initTokenClient();};
-  document.head.appendChild(s);
-}
-
-function initTokenClient(){
-  if(!gisInited||!oauthClientId)return;
-  tokenClient=google.accounts.oauth2.initTokenClient({
-    client_id:oauthClientId,
-    scope:'https://www.googleapis.com/auth/spreadsheets',
-    callback:(resp)=>{
-      if(resp.error){showOAuthStatus('err','Sign-in failed: '+resp.error);return;}
-      accessToken=resp.access_token;
-      // Decode email from id_token hint if available
-      showOAuthStatus('ok','Signed in — sheet write-back enabled');
-      document.getElementById('oauth-signin-btn').style.display='none';
-      document.getElementById('oauth-signout-btn').style.display='';
-      document.getElementById('oauth-user-label').textContent='Signed in';
-      showToast('Google sign-in successful — edits will write back to your sheet');
-    },
-  });
-}
-
-function saveOAuthClientId(){
-  const id=document.getElementById('cfg-oauth-client-id').value.trim();
-  if(!id){showToast('Enter your OAuth Client ID first');return;}
-  oauthClientId=id;
-  try{localStorage.setItem('propcma_oauth_client_id',id);}catch(e){}
-  loadGisScript();
-  showToast('Client ID saved');
-  document.getElementById('oauth-signin-btn').style.display='';
-  showOAuthStatus('idle','Client ID saved — click "Sign in with Google" to authorise write access');
-}
-
-function loadOAuthClientId(){
-  try{oauthClientId=localStorage.getItem('propcma_oauth_client_id')||'';}catch(e){}
-  if(oauthClientId){
-    document.getElementById('cfg-oauth-client-id').value=oauthClientId;
-    document.getElementById('oauth-signin-btn').style.display='';
-    loadGisScript();
-  }
-}
-
-function googleSignIn(){
-  if(!tokenClient){showToast('GIS not ready — wait a moment and try again');return;}
-  tokenClient.requestAccessToken({prompt:'consent'});
-}
-
-function googleSignOut(){
-  if(accessToken)google.accounts.oauth2.revoke(accessToken,()=>{});
-  accessToken=null;
-  document.getElementById('oauth-signin-btn').style.display='';
-  document.getElementById('oauth-signout-btn').style.display='none';
-  showOAuthStatus('idle','Signed out — edits will only save to Supabase');
-  showToast('Signed out of Google');
-}
-
-function showOAuthStatus(type,msg){
-  const el=document.getElementById('oauth-status');
-  el.style.display='inline-flex';
-  el.className='status-pill '+(type==='ok'?'ok':type==='err'?'err':'idle');
-  el.innerHTML=(type==='ok'?'<i class="ti ti-check"></i> ':'<i class="ti ti-info-circle"></i> ')+msg;
-}
-
-// ── Sheet column ensure + write-back ─────────────────────────
-const SHEET_EDIT_COLS={
-  'SQM':            p=>p.sqm!=null?String(p.sqm):'',
-  'Land Area (SQM)':p=>p.landArea!=null?String(p.landArea):'',
-  'Annual Rent ($)':p=>p.annualRent!=null?String(p.annualRent):'',
-  'Initial Yield (%)':p=>p.initialYield!=null?String(p.initialYield):'',
-  'Notes':          p=>p.notes||'',
-  'Photos':         p=>p.photos||'',
-};
-
-async function ensureSheetColumns(headers){
-  // Add any missing edit columns to the sheet header row
-  const needed=Object.keys(SHEET_EDIT_COLS).filter(c=>!headers.includes(c));
-  if(!needed.length)return headers;
-  const newHeaders=[...headers,...needed];
-  const range=`${cfg.sheetTab}!1:1`;
-  await fetch(
-    `https://sheets.googleapis.com/v4/spreadsheets/${cfg.sheetId}/values/${encodeURIComponent(range)}?valueInputOption=RAW`,
-    {method:'PUT',headers:{'Authorization':'Bearer '+accessToken,'Content-Type':'application/json'},
-     body:JSON.stringify({range,majorDimension:'ROWS',values:[newHeaders]})}
-  );
-  return newHeaders;
-}
-
-async function writePropertyToSheet(prop){
-  if(!accessToken){
-    document.getElementById('so-sheets-status').style.display='';
-    return false;
-  }
-  try{
-    // Fetch current headers
-    const hRes=await fetch(
-      `https://sheets.googleapis.com/v4/spreadsheets/${cfg.sheetId}/values/${encodeURIComponent(cfg.sheetTab+'!1:1')}?key=${cfg.apiKey}`
-    );
-    const hData=await hRes.json();
-    let headers=(hData.values?.[0]||[]).map(String);
-    headers=await ensureSheetColumns(headers);
-
-    // Find the row number for this property (id is gs_N where N is row number)
-    const rowNum=parseInt((prop.id||'').replace('gs_',''));
-    if(isNaN(rowNum)||rowNum<2){
-      // Manually-imported rows don't have a sheet row — skip sheet write
-      document.getElementById('so-sheets-status').style.display='';
-      return false;
-    }
-
-    // Build the full row values (only update columns we know about)
-    const colUpdates=Object.entries(SHEET_EDIT_COLS);
-    const requests=colUpdates.map(([colName,getter])=>{
-      const colIdx=headers.indexOf(colName);
-      if(colIdx<0)return null;
-      const colLetter=colIdxToLetter(colIdx);
-      const cellRange=`${cfg.sheetTab}!${colLetter}${rowNum}`;
-      return fetch(
-        `https://sheets.googleapis.com/v4/spreadsheets/${cfg.sheetId}/values/${encodeURIComponent(cellRange)}?valueInputOption=USER_ENTERED`,
-        {method:'PUT',headers:{'Authorization':'Bearer '+accessToken,'Content-Type':'application/json'},
-         body:JSON.stringify({range:cellRange,majorDimension:'ROWS',values:[[getter(prop)]]})}
-      );
-    }).filter(Boolean);
-
-    await Promise.all(requests);
-    return true;
-  }catch(e){
-    console.error('Sheet write error:',e);
-    return false;
-  }
-}
-
-function colIdxToLetter(idx){
-  let letter='';
-  idx+=1; // 1-based
-  while(idx>0){
-    const rem=(idx-1)%26;
-    letter=String.fromCharCode(65+rem)+letter;
-    idx=Math.floor((idx-1)/26);
-  }
-  return letter;
-}
-
 // ── Edit panel ────────────────────────────────────────────────
 let editingPropId=null;
 
@@ -1516,18 +1586,18 @@ async function saveEdit(){
     return;
   }
 
-  // Write back to Google Sheet if signed in
+  // Write back to Excel if signed in
   let sheetOk=false;
-  if(accessToken){
-    sheetOk=await writePropertyToSheet(p);
+  if(msToken){
+    sheetOk=await writePropertyToExcel(p);
   }else{
     document.getElementById('so-sheets-status').style.display='';
   }
 
   btn.disabled=false;btn.innerHTML='<i class="ti ti-check" aria-hidden="true"></i> Save changes';
-  const sheetMsg=accessToken?(sheetOk?' + sheet updated':' (sheet write failed)'):'';
+  const sheetMsg=msToken?(sheetOk?' + Excel updated':' (Excel write failed)'):'';
   status.textContent='✓ Saved'+sheetMsg;
-  showToast('Property updated'+(sheetOk?' and written to sheet':''));
+  showToast('Property updated'+(sheetOk?' and written to Excel':''));
 
   // Refresh table
   applyFilters();
