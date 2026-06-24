@@ -784,12 +784,20 @@ function dbToApp(r){
 }
 
 // ── Init ──────────────────────────────────────────────────────
+// Wraps a promise with a timeout — prevents infinite spinning if config.js has wrong credentials
+function withTimeout(promise, ms, msg){
+  return Promise.race([
+    promise,
+    new Promise((_,reject)=>setTimeout(()=>reject(new Error(msg||'Timeout')),ms))
+  ]);
+}
+
 async function init(){
   setLoading('Connecting to database…');
   // Handle MSAL redirect response first (after sign-in redirect)
   try{ await msalApp.handleRedirectPromise(); }catch(e){}
 
-  // Check if already signed in
+  // Check if already signed in to Microsoft
   const accounts=msalApp.getAllAccounts();
   if(accounts.length){
     msAccount=accounts[0];
@@ -797,16 +805,34 @@ async function init(){
     updateMsUI();
   }
 
+  // Test Supabase connection with a 8-second timeout
   try{
-    const{error}=await sb.from('app_settings').select('id').limit(1);
+    const dbCheck=sb.from('app_settings').select('id').limit(1);
+    const{error}=await withTimeout(dbCheck, 8000,
+      'Connection timed out — check your Supabase URL and anon key in config.js');
     if(error)throw error;
     document.getElementById('db-badge').innerHTML='<i class="ti ti-check" aria-hidden="true"></i> Connected to Supabase';
     document.getElementById('db-badge').style.background='#dcfce7';
     document.getElementById('db-badge').style.color='#166534';
   }catch(e){
-    document.getElementById('db-badge').innerHTML='<i class="ti ti-x" aria-hidden="true"></i> Database error — check config.js';
+    const isPlaceholder = window.SUPABASE_URL?.includes('YOUR_PROJECT');
+    const msg = isPlaceholder
+      ? 'config.js has placeholder values — add your Supabase URL and anon key'
+      : e.message||'Database error — check config.js';
+    document.getElementById('db-badge').innerHTML=`<i class="ti ti-x" aria-hidden="true"></i> ${msg}`;
     document.getElementById('db-badge').style.background='#fef2f2';
     document.getElementById('db-badge').style.color='#991b1b';
+    // Show loading error on overlay too so user isn't left staring at spinner
+    setLoading('⚠ '+msg);
+    document.getElementById('loading-overlay').querySelector('.loading-spinner').style.display='none';
+    // Add a button to dismiss and continue in read-only mode
+    const btn=document.createElement('button');
+    btn.textContent='Continue anyway';
+    btn.className='btn';
+    btn.style.cssText='margin-top:12px;background:rgba(255,255,255,.15);border-color:rgba(255,255,255,.3);color:#fff;';
+    btn.onclick=()=>{hideLoading();switchView('settings');};
+    document.getElementById('loading-overlay').appendChild(btn);
+    return; // Don't try to load properties if DB is broken
   }
   setLoading('Loading settings…');
   await loadCfg();
