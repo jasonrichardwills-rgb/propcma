@@ -539,7 +539,10 @@ input[type=checkbox]{cursor:pointer;accent-color:var(--cb);}
           <div class="settings-desc">Map your Excel columns to PropCMA fields. Saved to the database — applies for all teammates.</div>
           <div id="col-map-rows"></div>
           <hr style="border:none;border-top:var(--border);margin:14px 0;">
-          <button class="btn btn-primary" onclick="saveColMap()"><i class="ti ti-check" aria-hidden="true"></i> Save mapping & sync</button>
+          <div style="display:flex;gap:8px;">
+            <button class="btn btn-primary" onclick="saveColMap()"><i class="ti ti-check" aria-hidden="true"></i> Save mapping & sync</button>
+            <button class="btn" onclick="resetAndRemap()"><i class="ti ti-refresh" aria-hidden="true"></i> Re-detect columns</button>
+          </div>
         </div>
 
       </div>
@@ -1010,12 +1013,11 @@ async function syncFromExcel(){
 
     const headers=values[0].map(String);
 
-    // Auto-map columns if we don't have a mapping yet
-    if(!Object.keys(cfg.colMap).length){
-      autoMapColumns(headers);
-      showColMapCard(headers);
-      await saveCfg();
-    }
+    // Always re-run auto-mapping so stale cached mappings don't persist
+    autoMapColumns(headers);
+    showColMapCard(headers);
+    await saveCfg();
+    console.info('PropCMA column mapping:', cfg.colMap);
 
     // Build colIdx from saved mapping
     const colIdx={};
@@ -1140,17 +1142,42 @@ function toggleKeyVis(id,btn){
 
 function autoMapColumns(h){
   cfg.colMap={};
+  // Exact and fuzzy aliases matched against actual spreadsheet headers
+  const aliases={
+    address:     ['address','property address','street address','location','site address'],
+    saleDate:    ['sale date','date','settlement date','sold date','transaction date'],
+    leaseOrSale: ['lease/sale','lease or sale','type','transaction type','sale type','leasesale'],
+    auction:     ['auction','sold by auction','method'],
+    category:    ['category','property type','classification'],
+    sqm:         ['sqm','floor area','nla','gla','area','m2','floorarea'],
+    pricePerSqm: ['price per sqm','$/m2','$/sqm','rate','price/sqm','pricepersqm','per sqm'],
+    salePrice:   ['sale price','price','sold price','contract price','purchase price','saleprice'],
+    purchaser:   ['name of purchaser/tenant','name of purchasers/tenant','purchaser','purchaser/tenant','buyer','tenant'],
+    vendor:      ['name of vendor/landlord','vendor','vendor/landlord','seller','landlord'],
+  };
   FIELDS.forEach(f=>{
-    const i=h.findIndex(x=>{const xl=x.toLowerCase().replace(/[\s\/\-_]/g,'');
-      return xl.includes(f.key.toLowerCase())||f.label.toLowerCase().split(' ').some(w=>w.length>2&&xl.includes(w.toLowerCase()));});
+    const alts=aliases[f.key]||[];
+    const i=h.findIndex(x=>{
+      const xl=x.toLowerCase().trim();
+      const xn=xl.replace(/[\s\/\-_]/g,'');
+      // Exact alias match (normalised)
+      if(alts.some(a=>xl===a||xn===a.replace(/[\s\/\-_]/g,'')))return true;
+      // Fuzzy: field key or significant label words
+      return xn.includes(f.key.toLowerCase())||
+        f.label.toLowerCase().split(' ').some(w=>w.length>3&&xn.includes(w.toLowerCase()));
+    });
     cfg.colMap[f.key]=i>=0?h[i]:'';
   });
+  // Broker 1–4: match "Broker 1", "Broker1", "broker 1" etc
   BROKER_FIELDS.forEach((b,idx)=>{
     const num=idx+1;
-    const i=h.findIndex(x=>{const xl=x.toLowerCase().replace(/[\s_\-]/g,'');
-      return xl===`broker${num}`||xl===`broker0${num}`;});
+    const i=h.findIndex(x=>{
+      const xl=x.toLowerCase().replace(/[\s_\-]/g,'');
+      return xl===`broker${num}`;
+    });
     cfg.colMap[b.key]=i>=0?h[i]:'';
   });
+  console.info('PropCMA column mapping result:', cfg.colMap);
 }
 
 function showColMapCard(headers){
@@ -1179,6 +1206,14 @@ function buildColMapUI(h,wrap){
 }
 
 async function saveColMap(){await saveCfg();showToast('Mapping saved');syncFromExcel();}
+
+async function resetAndRemap(){
+  // Clear saved mapping and re-sync to trigger fresh auto-detection
+  cfg.colMap={};
+  await saveCfg();
+  showToast('Mapping cleared — re-syncing…');
+  await syncFromExcel();
+}
 
 // ── Street View key (stored locally per-browser) ───────────────
 function loadGmapsKey(){
