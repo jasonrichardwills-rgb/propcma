@@ -643,7 +643,7 @@ input[type=checkbox]{cursor:pointer;accent-color:var(--cb);}
 
 <script>
 // ── Supabase client ──────────────────────────────────────────
-const sb = supabase.createClient(window.SUPABASE_URL, window.SUPABASE_ANON);
+const sb = supabase.createClient(window.SUPABASE_URL = 'https://mcurpiuaezilcnnuqvnm.supabase.co' , window.SUPABASE_ANON = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im1jdXJwaXVhZXppbGNubnVxdm5tIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODA1MTA5MTEsImV4cCI6MjA5NjA4NjkxMX0.nPts4jRqwTm_CZsD2OUmO5ZgjTKIMk1-CLsNqRYCOxw');
 
 // ── State ────────────────────────────────────────────────────
 let allProperties=[],filtered=[],selected=new Set();
