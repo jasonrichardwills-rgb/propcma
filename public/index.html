@@ -9,7 +9,7 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
-<script src="https://alcdn.msauth.net/browser/2.38.3/js/msal-browser.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@azure/msal-browser@3.27.0/dist/msal-browser.min.js"></script>
 <script src="config.js"></script>
 <style>
 :root{
@@ -631,26 +631,13 @@ const sb = supabase.createClient(window.SUPABASE_URL, window.SUPABASE_ANON);
 // ── Microsoft / MSAL configuration ──────────────────────────
 const MS_CLIENT_ID = 'e41d7680-86d8-49a0-8a68-17a5f166e10b';
 const MS_TENANT_ID = 'eb16ec4a-f2aa-404f-b306-b391df9df367';
-// SharePoint/OneDrive Excel file URL — encoded for Graph API path lookup
 const EXCEL_URL    = 'https://cjch.sharepoint.com/sites/BrokerToolKit/Shared Documents/PropCMA/propcma/public/Sales Data Colliers.xlsx';
-const EXCEL_SHEET  = 'Sheet1'; // tab name inside the Excel file
+const EXCEL_SHEET  = 'Sheet1';
+const MS_SCOPES    = ['User.Read','Files.ReadWrite','Sites.ReadWrite.All'];
 
-const msalApp = new msal.PublicClientApplication({
-  auth:{
-    clientId: MS_CLIENT_ID,
-    authority: `https://login.microsoftonline.com/${MS_TENANT_ID}`,
-    redirectUri: window.location.origin,
-  },
-  cache:{
-    cacheLocation: 'localStorage',       // persist across sessions
-    storeAuthStateInCookie: true,        // IE11 / cross-tab fallback
-  },
-});
-
-const MS_SCOPES = ['User.Read','Files.ReadWrite','Sites.ReadWrite.All'];
-
-let msAccount  = null;   // current signed-in account
-let msToken    = null;   // current access token
+let msalApp    = null;  // initialised inside init() once scripts are loaded
+let msAccount  = null;
+let msToken    = null;
 
 // ── State ────────────────────────────────────────────────────
 let allProperties=[],filtered=[],selected=new Set();
@@ -794,15 +781,35 @@ function withTimeout(promise, ms, msg){
 
 async function init(){
   setLoading('Connecting to database…');
-  // Handle MSAL redirect response first (after sign-in redirect)
-  try{ await msalApp.handleRedirectPromise(); }catch(e){}
 
-  // Check if already signed in to Microsoft
-  const accounts=msalApp.getAllAccounts();
-  if(accounts.length){
-    msAccount=accounts[0];
-    await refreshMsToken();
-    updateMsUI();
+  // Initialise MSAL now that all scripts are loaded
+  try{
+    msalApp = new msal.PublicClientApplication({
+      auth:{
+        clientId: MS_CLIENT_ID,
+        authority: `https://login.microsoftonline.com/${MS_TENANT_ID}`,
+        redirectUri: window.location.origin,
+      },
+      cache:{
+        cacheLocation: 'localStorage',
+        storeAuthStateInCookie: true,
+      },
+    });
+    await msalApp.initialize();
+  }catch(e){
+    console.warn('MSAL init failed:',e);
+    // Non-fatal — app works without Microsoft sign-in
+  }
+
+  // Handle MSAL redirect response (after sign-in redirect)
+  if(msalApp){
+    try{ await msalApp.handleRedirectPromise(); }catch(e){}
+    const accounts=msalApp.getAllAccounts();
+    if(accounts.length){
+      msAccount=accounts[0];
+      await refreshMsToken();
+      updateMsUI();
+    }
   }
 
   // Test Supabase connection with a 8-second timeout
@@ -847,6 +854,7 @@ function hideLoading(){const ol=document.getElementById('loading-overlay');ol.cl
 
 // ── MSAL sign-in / sign-out ───────────────────────────────────
 async function msSignIn(){
+  if(!msalApp){showToast('Microsoft auth not available — check browser console');return;}
   try{
     // Try silent first (uses cached token from localStorage)
     msAccount=msalApp.getAllAccounts()[0]||null;
@@ -879,7 +887,7 @@ async function msSignOut(){
 }
 
 async function refreshMsToken(){
-  if(!msAccount)return null;
+  if(!msAccount||!msalApp)return null;
   try{
     const result=await msalApp.acquireTokenSilent({scopes:MS_SCOPES,account:msAccount});
     msToken=result.accessToken;
