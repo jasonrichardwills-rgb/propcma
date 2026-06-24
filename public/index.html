@@ -980,19 +980,33 @@ async function syncFromExcel(){
   if(!msToken&&!msAccount){showToast('Sign in with your Colliers account first');switchView('settings');return;}
   setSyncState('loading','Syncing from Excel…');
   try{
-    // Get the drive item for our Excel file
+    // Resolve the drive item from the shared URL
     const encoded='u!'+btoa(EXCEL_URL).replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,'');
     const driveItem=await graphGet(`/shares/${encoded}/driveItem`);
     const driveId=driveItem.parentReference?.driveId;
     const itemId=driveItem.id;
 
+    // Auto-discover the first worksheet tab name
+    const sheetsData=await graphGet(`/drives/${driveId}/items/${itemId}/workbook/worksheets`);
+    const sheets=(sheetsData.value||[]);
+    if(!sheets.length){setSyncState('err','No worksheets found');showToast('Excel file has no worksheets');return;}
+
+    // Use a saved sheet name, or default to first sheet
+    const sheetName=cfg._sheetName||sheets[0].name;
+    cfg._sheetName=sheetName;
+
+    // If multiple sheets, let user know which one we're using
+    if(sheets.length>1){
+      console.info(`PropCMA: multiple sheets found (${sheets.map(s=>s.name).join(', ')}) — using "${sheetName}"`);
+    }
+
     // Read the used range from the worksheet
     const rangeData=await graphGet(
-      `/drives/${driveId}/items/${itemId}/workbook/worksheets/${encodeURIComponent(EXCEL_SHEET)}/usedRange`
+      `/drives/${driveId}/items/${itemId}/workbook/worksheets/${encodeURIComponent(sheetName)}/usedRange`
     );
 
     const values=rangeData.values||[];
-    if(values.length<2){setSyncState('ok','Sheet empty');showToast('Excel sheet has no data rows');return;}
+    if(values.length<2){setSyncState('ok','Sheet empty');showToast(`"${sheetName}" has no data rows`);return;}
 
     const headers=values[0].map(String);
 
@@ -1031,7 +1045,7 @@ async function syncFromExcel(){
       return p;
     }).filter(p=>p.address||p.saleDate);
 
-    // Store drive/item IDs in cfg for write-back
+    // Store IDs for write-back
     cfg._driveId=driveId;
     cfg._itemId=itemId;
     cfg._headers=headers;
@@ -1044,9 +1058,9 @@ async function syncFromExcel(){
     const now=new Date().toLocaleTimeString('en-NZ',{hour:'2-digit',minute:'2-digit'});
     setSyncState('ok',`Synced · ${allProperties.length} · ${now}`);
     document.getElementById('last-sync-label').textContent=
-      `Last synced: ${now} — ${allProperties.length} records from Excel`;
+      `Last synced: ${now} — ${allProperties.length} records from "${sheetName}"`;
     applyFilters();
-    showToast(`${allProperties.length} properties synced from Excel`);
+    showToast(`${allProperties.length} properties synced from "${sheetName}"`);
   }catch(e){
     setSyncState('err','Sync error');
     showToast('Sync failed: '+e.message);
@@ -1070,14 +1084,15 @@ async function writePropertyToExcel(prop){
     return false;
   }
   try{
+    const sn=cfg._sheetName||'Sheet1';
     let headers=cfg._headers;
     // Ensure edit columns exist in the sheet
     const needed=Object.keys(EXCEL_EDIT_COLS).filter(c=>!headers.includes(c));
     if(needed.length){
       const newHeaders=[...headers,...needed];
-      const range=`${EXCEL_SHEET}!A1:${colLetter(newHeaders.length-1)}1`;
+      const range=`${sn}!A1:${colLetter(newHeaders.length-1)}1`;
       await graphPatch(
-        `/drives/${cfg._driveId}/items/${cfg._itemId}/workbook/worksheets/${encodeURIComponent(EXCEL_SHEET)}/range(address='${range}')`,
+        `/drives/${cfg._driveId}/items/${cfg._itemId}/workbook/worksheets/${encodeURIComponent(sn)}/range(address='${range}')`,
         {values:[newHeaders]}
       );
       cfg._headers=newHeaders;
@@ -1092,9 +1107,9 @@ async function writePropertyToExcel(prop){
     const writes=Object.entries(EXCEL_EDIT_COLS).map(([colName,getter])=>{
       const ci=headers.indexOf(colName);
       if(ci<0)return Promise.resolve();
-      const cellAddr=`${EXCEL_SHEET}!${colLetter(ci)}${rowNum}`;
+      const cellAddr=`${sn}!${colLetter(ci)}${rowNum}`;
       return graphPatch(
-        `/drives/${cfg._driveId}/items/${cfg._itemId}/workbook/worksheets/${encodeURIComponent(EXCEL_SHEET)}/range(address='${cellAddr}')`,
+        `/drives/${cfg._driveId}/items/${cfg._itemId}/workbook/worksheets/${encodeURIComponent(sn)}/range(address='${cellAddr}')`,
         {values:[[getter(prop)]]}
       );
     });
