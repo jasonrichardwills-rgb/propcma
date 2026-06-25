@@ -1081,44 +1081,81 @@ const EXCEL_EDIT_COLS={
 };
 
 async function writePropertyToExcel(prop){
-  if(!msToken||!cfg._driveId||!cfg._itemId){
+  if(!msToken){
     document.getElementById('so-sheets-status').style.display='';
     return false;
   }
+  // driveId/itemId lost on page refresh — re-resolve from the shared URL
+  if(!cfg._driveId||!cfg._itemId){
+    try{
+      const encoded='u!'+btoa(EXCEL_URL).replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,'');
+      const driveItem=await graphGet(`/shares/${encoded}/driveItem`);
+      cfg._driveId=driveItem.parentReference?.driveId;
+      cfg._itemId=driveItem.id;
+      if(!cfg._sheetName){
+        const sheetsData=await graphGet(`/drives/${cfg._driveId}/items/${cfg._itemId}/workbook/worksheets`);
+        cfg._sheetName=(sheetsData.value||[])[0]?.name||'Sheet1';
+      }
+      if(!cfg._headers){
+        const rangeData=await graphGet(
+          `/drives/${cfg._driveId}/items/${cfg._itemId}/workbook/worksheets/${encodeURIComponent(cfg._sheetName)}/usedRange`
+        );
+        cfg._headers=(rangeData.values||[[]])[0].map(String);
+      }
+    }catch(e){
+      console.error('Excel resolve error:',e);
+      document.getElementById('so-sheets-status').style.display='';
+      return false;
+    }
+  }
+
   try{
     const sn=cfg._sheetName||'Sheet1';
-    let headers=cfg._headers;
-    // Ensure edit columns exist in the sheet
+    let headers=cfg._headers||[];
+
+    // Add missing edit columns to the sheet header row
     const needed=Object.keys(EXCEL_EDIT_COLS).filter(c=>!headers.includes(c));
     if(needed.length){
       const newHeaders=[...headers,...needed];
-      const range=`${sn}!A1:${colLetter(newHeaders.length-1)}1`;
+      // Use correct Graph workbook range PATCH syntax
       await graphPatch(
-        `/drives/${cfg._driveId}/items/${cfg._itemId}/workbook/worksheets/${encodeURIComponent(sn)}/range(address='${range}')`,
+        `/drives/${cfg._driveId}/items/${cfg._itemId}/workbook/worksheets/${encodeURIComponent(sn)}/usedRange`,
         {values:[newHeaders]}
       );
       cfg._headers=newHeaders;
       headers=newHeaders;
     }
 
-    // Row number from prop id: xl_N → N
+    // Row number from prop id: xl_N → N (row N in the spreadsheet, 1-based, row 1 = header)
     const rowNum=parseInt((prop.id||'').replace('xl_',''));
-    if(isNaN(rowNum)||rowNum<2)return false;
+    if(isNaN(rowNum)||rowNum<2){
+      console.warn('Excel write: no valid row number for prop id',prop.id);
+      document.getElementById('so-sheets-status').style.display='';
+      return false;
+    }
 
-    // Write each edit column individually
-    const writes=Object.entries(EXCEL_EDIT_COLS).map(([colName,getter])=>{
-      const ci=headers.indexOf(colName);
-      if(ci<0)return Promise.resolve();
-      const cellAddr=`${sn}!${colLetter(ci)}${rowNum}`;
-      return graphPatch(
-        `/drives/${cfg._driveId}/items/${cfg._itemId}/workbook/worksheets/${encodeURIComponent(sn)}/range(address='${cellAddr}')`,
-        {values:[[getter(prop)]]}
-      );
+    // Write each edit field as a single-cell PATCH
+    // Graph API cell address format: /range(address='SheetName!A2')
+    const base=`/drives/${cfg._driveId}/items/${cfg._itemId}/workbook/worksheets/${encodeURIComponent(sn)}`;
+    const writes=Object.entries(EXCEL_EDIT_COLS).map(async([colName,getter])=>{
+      let ci=headers.indexOf(colName);
+      if(ci<0){
+        // Column doesn't exist yet — append it
+        headers.push(colName);
+        cfg._headers=headers;
+        ci=headers.length-1;
+        // Write the header cell first
+        await graphPatch(`${base}/cell(row=0,column=${ci})`,{values:[[colName]]});
+      }
+      const val=getter(prop);
+      // Use 0-based row/column cell API — more reliable than address strings
+      return graphPatch(`${base}/cell(row=${rowNum-1},column=${ci})`,{values:[[val]]});
     });
+
     await Promise.all(writes);
     return true;
   }catch(e){
-    console.error('Excel write error:',e);
+    console.error('Excel write error:',e.message,e);
     return false;
   }
 }
