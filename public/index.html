@@ -1117,9 +1117,11 @@ async function writePropertyToExcel(prop){
     const needed=Object.keys(EXCEL_EDIT_COLS).filter(c=>!headers.includes(c));
     if(needed.length){
       const newHeaders=[...headers,...needed];
-      // Use correct Graph workbook range PATCH syntax
+      // IMPORTANT: must patch an explicit range address — never usedRange.
+      // usedRange spans all rows, so writing a 1-row array causes a 400 dimension mismatch.
+      const lastCol=colNumToLetter(newHeaders.length);
       await graphPatch(
-        `/drives/${cfg._driveId}/items/${cfg._itemId}/workbook/worksheets/${encodeURIComponent(sn)}/usedRange`,
+        `/drives/${cfg._driveId}/items/${cfg._itemId}/workbook/worksheets/${encodeURIComponent(sn)}/range(address='A1:${lastCol}1')`,
         {values:[newHeaders]}
       );
       cfg._headers=newHeaders;
@@ -1164,6 +1166,14 @@ function colLetter(idx){
   let letter='';idx+=1;
   while(idx>0){const rem=(idx-1)%26;letter=String.fromCharCode(65+rem)+letter;idx=Math.floor((idx-1)/26);}
   return letter;
+}
+
+// Convert 1-based column count to letter(s) — e.g. 26→Z, 27→AA
+// Used to build explicit range addresses for Graph API PATCH calls
+function colNumToLetter(n){
+  let s='';
+  while(n>0){n--;s=String.fromCharCode(65+(n%26))+s;n=Math.floor(n/26);}
+  return s;
 }
 
 // ── Settings UI helpers ───────────────────────────────────────
