@@ -1189,15 +1189,17 @@ function toggleKeyVis(id,btn){
 
 function autoMapColumns(h){
   cfg.colMap={};
-  // Exact and fuzzy aliases matched against actual spreadsheet headers
+  // Alias matching is EXACT only (normalised) — no fuzzy substring fallback.
+  // Fuzzy matching caused false positives, e.g. a numeric column matching 'date'
+  // and populating the date filter input with a raw number like 1000.
   const aliases={
     address:     ['address','property address','street address','location','site address'],
-    saleDate:    ['sale date','date','settlement date','sold date','transaction date'],
+    saleDate:    ['sale date','date of sale','settlement date','sold date','transaction date','contract date'],
     leaseOrSale: ['lease/sale','lease or sale','type','transaction type','sale type','leasesale'],
-    auction:     ['auction','sold by auction','method'],
-    category:    ['category','property type','classification'],
-    sqm:         ['sqm','floor area','nla','gla','area','m2','floorarea'],
-    pricePerSqm: ['price per sqm','$/m2','$/sqm','rate','price/sqm','pricepersqm','per sqm'],
+    auction:     ['auction','sold by auction','auction flag'],
+    category:    ['category','property type','classification','property category'],
+    sqm:         ['sqm','floor area','nla','gla','m2','floorarea','net lettable area','gross lettable area'],
+    pricePerSqm: ['price per sqm','$/m2','$/sqm','price/sqm','pricepersqm','per sqm','rate per sqm'],
     salePrice:   ['sale price','price','sold price','contract price','purchase price','saleprice'],
     purchaser:   ['name of purchaser/tenant','name of purchasers/tenant','purchaser','purchaser/tenant','buyer','tenant'],
     vendor:      ['name of vendor/landlord','vendor','vendor/landlord','seller','landlord'],
@@ -1207,11 +1209,8 @@ function autoMapColumns(h){
     const i=h.findIndex(x=>{
       const xl=x.toLowerCase().trim();
       const xn=xl.replace(/[\s\/\-_]/g,'');
-      // Exact alias match (normalised)
-      if(alts.some(a=>xl===a||xn===a.replace(/[\s\/\-_]/g,'')))return true;
-      // Fuzzy: field key or significant label words
-      return xn.includes(f.key.toLowerCase())||
-        f.label.toLowerCase().split(' ').some(w=>w.length>3&&xn.includes(w.toLowerCase()));
+      // Exact alias match only (normalised whitespace/punctuation)
+      return alts.some(a=>xl===a||xn===a.replace(/[\s\/\-_]/g,''));
     });
     cfg.colMap[f.key]=i>=0?h[i]:'';
   });
