@@ -412,14 +412,14 @@ def build_report(data, output_path):
     if prepared_for:
         c.setFont('Helvetica', 7)
         c.setFillColor(HexColor('#93C5E8'))
-        c.drawString(30, H - 344, 'PREPARED FOR')
-        c.setFont('Helvetica-Bold', 12)
+        c.drawString(30, H - 345, 'PREPARED FOR')
+        c.setFont('Helvetica-Bold', 11)
         c.setFillColor(WHITE)
         c.drawString(30, H - 360, prepared_for)
 
     # Subject property block
     if subject:
-        box_y = H - 420
+        box_y = H - 475
         c.setFillColor(HexColor('#0A4A7A'))
         c.roundRect(20, box_y, panel_w - 40, 80, 4, fill=1, stroke=0)
         c.setFont('Helvetica', 7)
@@ -446,7 +446,7 @@ def build_report(data, output_path):
 
     # Indicated value block
     if indicated:
-        iv_y = H - 540
+        iv_y = H - 575
         c.setFillColor(BLUE)
         c.roundRect(20, iv_y, panel_w - 40, 80, 4, fill=1, stroke=0)
         c.setFont('Helvetica', 7)
