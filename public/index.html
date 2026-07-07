@@ -370,8 +370,6 @@ input[type=checkbox]{cursor:pointer;accent-color:var(--cb);}
               <div>
                 <div class="report-title">Comparable Market Analysis</div>
                 <div class="report-sub" id="report-date-line"></div>
-                <div class="report-sub" id="report-prepared-line" style="margin-top:5px;font-weight:600;color:var(--cb-dark);"></div>
-                <div class="report-sub" id="report-subject-line" style="margin-top:2px;font-weight:600;color:var(--cb-dark);"></div>
               </div>
               <div class="colliers-logo colliers-logo-report" role="img" aria-label="Colliers"></div>
             </div>
@@ -388,16 +386,6 @@ input[type=checkbox]{cursor:pointer;accent-color:var(--cb);}
             </div>
             <div class="report-section">
               <div class="report-section-title">Valuation — subject property</div>
-              <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:14px;">
-                <div class="field">
-                  <label>Prepared for</label>
-                  <input type="text" id="prepared-for" placeholder="Client / recipient name" oninput="syncReportMeta()">
-                </div>
-                <div class="field">
-                  <label>Subject property</label>
-                  <input type="text" id="subject-address" placeholder="e.g. 14 Leeds Street, Hornby" oninput="syncReportMeta()">
-                </div>
-              </div>
               <table class="adj-table">
                 <thead><tr><th>Factor</th><th>Comp median</th><th>Adjustment (%)</th><th>Adjusted $/m²</th></tr></thead>
                 <tbody>
@@ -720,18 +708,23 @@ async function saveCfg(){
 // ── Supabase: properties ───────────────────────────────────────
 async function loadProperties(){
   try{
-    // Supabase caps each select() at 1,000 rows — page through in batches until done
+    // Supabase caps each select() at 1,000 rows — page through in batches until done.
+    // Secondary order by id gives a stable sort so ties don't duplicate/skip across pages.
     const PAGE=1000;
     let all=[],from=0;
     while(true){
       const{data,error}=await sb.from('properties').select('*')
         .order('sale_date_ts',{ascending:false})
+        .order('id',{ascending:true})
         .range(from,from+PAGE-1);
       if(error)throw error;
       if(data&&data.length)all=all.concat(data);
       if(!data||data.length<PAGE)break;
       from+=PAGE;
     }
+    // Safeguard: dedupe by id
+    const seen=new Set();
+    all=all.filter(r=>seen.has(r.id)?false:(seen.add(r.id),true));
     allProperties=all.map(dbToApp);
   }catch(e){allProperties=[];console.warn('Properties load:',e);}
   applyFilters();
@@ -1052,8 +1045,9 @@ async function syncFromExcel(){
     cfg._itemId=itemId;
     cfg._headers=headers;
 
-    // Clear old xl_ rows and save fresh
-    await sb.from('properties').delete().like('id','xl_%');
+    // Excel is the single source of truth — clear ALL old rows (including
+    // legacy gs_/p_ records from the old Google Sheets sync and manual imports)
+    await sb.from('properties').delete().neq('id','__never__');
     await saveProperties(newProps);
     allProperties=newProps;
 
@@ -1428,7 +1422,6 @@ function buildReport(){
   const sqms=sel.map(p=>p.sqm).filter(v=>v>0);
   const med=psm.length?Math.round(median(psm)):0;
   document.getElementById('report-date-line').textContent='Generated '+new Date().toLocaleDateString('en-NZ',{day:'numeric',month:'long',year:'numeric'})+' · '+sel.length+' comparable properties';
-  syncReportMeta();
   document.getElementById('r-n').textContent=sel.length;
   document.getElementById('r-median').textContent='$'+fmtNum(med);
   document.getElementById('r-range').textContent=psm.length?'$'+fmtNum(Math.round(psm[0]))+' – $'+fmtNum(Math.round(psm[psm.length-1])):'—';
@@ -1512,16 +1505,6 @@ async function confirmImport(){
 }
 function cancelImport(){document.getElementById('mapper-section').style.display='none';pendingRows=[];pendingHeaders=[];}
 
-// ── Report meta (Prepared for / Subject property) ─────────────
-function syncReportMeta(){
-  const pf=(document.getElementById('prepared-for')?.value||'').trim();
-  const sa=(document.getElementById('subject-address')?.value||'').trim();
-  const pfLine=document.getElementById('report-prepared-line');
-  const saLine=document.getElementById('report-subject-line');
-  if(pfLine) pfLine.textContent = pf ? 'Prepared for: '+pf : '';
-  if(saLine) saLine.textContent = sa ? 'Subject property: '+sa : '';
-}
-
 // ── PDF export ────────────────────────────────────────────────
 async function exportPDF(){
   const sel=allProperties.filter(p=>selected.has(p.id));
@@ -1545,8 +1528,6 @@ async function exportPDF(){
   const payload={
     report_title:'Comparable Market Analysis',
     generated:new Date().toLocaleDateString('en-NZ',{day:'numeric',month:'long',year:'numeric'}),
-    prepared_for:(document.getElementById('prepared-for')?.value||'').trim(),
-    subject_address:(document.getElementById('subject-address')?.value||'').trim(),
     subject_sqm:subSqm||null,
     indicated_value:subSqm?Math.round(adj*subSqm):null,
     adjusted_psm:Math.round(adj)||null,
