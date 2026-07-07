@@ -386,6 +386,16 @@ input[type=checkbox]{cursor:pointer;accent-color:var(--cb);}
             </div>
             <div class="report-section">
               <div class="report-section-title">Valuation — subject property</div>
+              <div style="display:flex;gap:16px;flex-wrap:wrap;margin-bottom:14px;">
+                <div style="display:flex;flex-direction:column;gap:4px;">
+                  <label style="font-size:12px;color:var(--ink2);font-weight:500;">Prepared for:</label>
+                  <input type="text" id="prepared-for" placeholder="Client name" style="width:240px;" oninput="saveReportFields()">
+                </div>
+                <div style="display:flex;flex-direction:column;gap:4px;flex:1;min-width:240px;">
+                  <label style="font-size:12px;color:var(--ink2);font-weight:500;">Subject Property:</label>
+                  <input type="text" id="subject-address" placeholder="e.g. 14 Leeds Street, Hornby" style="width:100%;" oninput="saveReportFields()">
+                </div>
+              </div>
               <table class="adj-table">
                 <thead><tr><th>Factor</th><th>Comp median</th><th>Adjustment (%)</th><th>Adjusted $/m²</th></tr></thead>
                 <tbody>
@@ -777,6 +787,7 @@ function withTimeout(promise, ms, msg){
 
 async function init(){
   setLoading('Connecting to database…');
+  restoreReportFields();
 
   // Initialise MSAL now that all scripts are loaded
   try{
@@ -1421,7 +1432,10 @@ function buildReport(){
   const prices=sel.map(p=>p.salePrice).filter(v=>v>0).sort((a,b)=>a-b);
   const sqms=sel.map(p=>p.sqm).filter(v=>v>0);
   const med=psm.length?Math.round(median(psm)):0;
-  document.getElementById('report-date-line').textContent='Generated '+new Date().toLocaleDateString('en-NZ',{day:'numeric',month:'long',year:'numeric'})+' · '+sel.length+' comparable properties';
+  const pfName=document.getElementById('prepared-for')?.value.trim();
+  const subjAddr=document.getElementById('subject-address')?.value.trim();
+  document.getElementById('report-date-line').textContent='Generated '+new Date().toLocaleDateString('en-NZ',{day:'numeric',month:'long',year:'numeric'})+' · '+sel.length+' comparable properties'
+    +(pfName?' · Prepared for '+pfName:'')+(subjAddr?' · '+subjAddr:'');
   document.getElementById('r-n').textContent=sel.length;
   document.getElementById('r-median').textContent='$'+fmtNum(med);
   document.getElementById('r-range').textContent=psm.length?'$'+fmtNum(Math.round(psm[0]))+' – $'+fmtNum(Math.round(psm[psm.length-1])):'—';
@@ -1528,6 +1542,8 @@ async function exportPDF(){
   const payload={
     report_title:'Comparable Market Analysis',
     generated:new Date().toLocaleDateString('en-NZ',{day:'numeric',month:'long',year:'numeric'}),
+    prepared_for:document.getElementById('prepared-for')?.value.trim()||'',
+    subject_address:document.getElementById('subject-address')?.value.trim()||'',
     subject_sqm:subSqm||null,
     indicated_value:subSqm?Math.round(adj*subSqm):null,
     adjusted_psm:Math.round(adj)||null,
@@ -1589,6 +1605,21 @@ function exportCSV(){
 }
 
 // ── View switching ────────────────────────────────────────────
+// Persist report input fields across sessions
+function saveReportFields(){
+  try{
+    localStorage.setItem('propcma_prepared_for',document.getElementById('prepared-for').value);
+    localStorage.setItem('propcma_subject_address',document.getElementById('subject-address').value);
+  }catch(e){}
+}
+function restoreReportFields(){
+  try{
+    const pf=localStorage.getItem('propcma_prepared_for');
+    const sa=localStorage.getItem('propcma_subject_address');
+    if(pf!=null)document.getElementById('prepared-for').value=pf;
+    if(sa!=null)document.getElementById('subject-address').value=sa;
+  }catch(e){}
+}
 function switchView(v){
   document.querySelectorAll('.view').forEach(el=>el.classList.remove('active'));
   document.querySelectorAll('.top-tab').forEach(el=>el.classList.remove('active'));
