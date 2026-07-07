@@ -351,6 +351,7 @@ def build_report(data, output_path):
     title = data.get('report_title', 'Comparable Market Analysis')
     gen_date = data.get('generated', '')
     subject = data.get('subject_address', '')
+    prepared_for = data.get('prepared_for', '')
     subject_sqm = data.get('subject_sqm')
     indicated = data.get('indicated_value')
     adj_psm = data.get('adjusted_psm')
@@ -406,6 +407,15 @@ def build_report(data, output_path):
     c.setFont('Helvetica', 9)
     c.setFillColor(HexColor('#93C5E8'))
     c.drawString(30, H - 312, 'Christchurch, New Zealand')
+
+    # Prepared for
+    if prepared_for:
+        c.setFont('Helvetica', 7)
+        c.setFillColor(HexColor('#93C5E8'))
+        c.drawString(30, H - 344, 'PREPARED FOR')
+        c.setFont('Helvetica-Bold', 12)
+        c.setFillColor(WHITE)
+        c.drawString(30, H - 360, prepared_for)
 
     # Subject property block
     if subject:
