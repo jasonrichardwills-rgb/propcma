@@ -696,14 +696,22 @@ function parseDate(raw){
   const n=Number(raw);
   if(!isNaN(n)&&n>1000&&n<100000&&!(Number.isInteger(n)&&n>=1900&&n<=2100))return new Date(Date.UTC(1899,11,30)+n*86400000).getTime();
   const s=String(raw).trim();if(!s)return null;let m;
-  m=s.match(/^(\d{4})-(\d{2})(?:-(\d{2}))?$/);if(m)return Date.UTC(+m[1],+m[2]-1,m[3]?+m[3]:1);
-  m=s.match(/^(\d{1,2})[\/\-\.](\d{1,2})[\/\-\.](\d{4})$/);if(m)return Date.UTC(+m[3],+m[2]-1,+m[1]);
-  m=s.match(/^(\d{1,2})[\/\-](\d{4})$/);if(m)return Date.UTC(+m[2],+m[1]-1,1);
-  m=s.match(/^(\d{4})$/);if(m)return Date.UTC(+m[1],0,1);
+  const Y2=y=>+y<100?2000+(+y):+y;  // 2-digit year → 20xx
   const MO={jan:0,feb:1,mar:2,apr:3,may:4,jun:5,jul:6,aug:7,sep:8,oct:9,nov:10,dec:11};
-  m=s.match(/^([a-z]{3})[a-z]*[\s\-](\d{4})$/i);if(m){const mo=MO[m[1].toLowerCase()];if(mo!==undefined)return Date.UTC(+m[2],mo,1);}
-  m=s.match(/^(\d{4})[\s\-]([a-z]{3})[a-z]*$/i);if(m){const mo=MO[m[2].toLowerCase()];if(mo!==undefined)return Date.UTC(+m[1],mo,1);}
-  const d=new Date(s);return isNaN(d)?null:d.getTime();
+  m=s.match(/^(\d{4})-(\d{1,2})(?:-(\d{1,2}))?$/);if(m)return Date.UTC(+m[1],+m[2]-1,m[3]?+m[3]:1);                                  // 2025-01-15 / 2025-01
+  m=s.match(/^(\d{1,2})[\/\-\.](\d{1,2})[\/\-\.](\d{2}|\d{4})$/);if(m)return Date.UTC(Y2(m[3]),+m[2]-1,+m[1]);                        // 15/01/2025 or 15/1/25 (NZ dd/mm)
+  m=s.match(/^(\d{1,2})[\/\-](\d{4})$/);if(m)return Date.UTC(+m[2],+m[1]-1,1);                                                        // 01/2025
+  m=s.match(/^(\d{4})$/);if(m)return Date.UTC(+m[1],0,1);                                                                             // 2025
+  m=s.match(/^(\d{1,2})[\s\-\/]([a-z]{3})[a-z]*\.?[\s\-\/](\d{2}|\d{4})$/i);                                                          // 15 Jan 2025 / 15-Jan-25
+  if(m){const mo=MO[m[2].slice(0,3).toLowerCase()];if(mo!==undefined)return Date.UTC(Y2(m[3]),mo,+m[1]);}
+  m=s.match(/^([a-z]{3})[a-z]*\.?[\s\-](\d{1,2}),\s*(\d{2}|\d{4})$/i);                                                                // Jan 15, 2025
+  if(m){const mo=MO[m[1].slice(0,3).toLowerCase()];if(mo!==undefined)return Date.UTC(Y2(m[3]),mo,+m[2]);}
+  m=s.match(/^([a-z]{3})[a-z]*\.?[\s\-](\d{2}|\d{4})$/i);                                                                             // Jan 2025 / Jan-25 / January 2025
+  if(m){const mo=MO[m[1].slice(0,3).toLowerCase()];if(mo!==undefined)return Date.UTC(Y2(m[2]),mo,1);}
+  m=s.match(/^(\d{4})[\s\-]([a-z]{3})[a-z]*$/i);                                                                                      // 2025 Jan
+  if(m){const mo=MO[m[2].slice(0,3).toLowerCase()];if(mo!==undefined)return Date.UTC(+m[1],mo,1);}
+  // Last resort: native parser, normalised to UTC midnight so local timezone can't shift the date
+  const d=new Date(s);return isNaN(d)?null:Date.UTC(d.getFullYear(),d.getMonth(),d.getDate());
 }
 
 // ── Supabase: settings (col mapping only now) ──────────────────
@@ -770,8 +778,11 @@ function appToDb(p){
   };
 }
 function dbToApp(r){
+  // Re-parse the date on load so improved parsing logic applies to existing rows
+  // without needing a re-sync; fall back to the stored timestamp if unparseable
+  const _ts=r.sale_date!=null?parseDate(r.sale_date):null;
   return{
-    id:r.id, address:r.address, saleDate:r.sale_date, saleDateTs:r.sale_date_ts,
+    id:r.id, address:r.address, saleDate:r.sale_date, saleDateTs:_ts!=null?_ts:(r.sale_date_ts??null),
     leaseOrSale:r.lease_or_sale, auction:r.auction, category:r.category,
     sqm:r.sqm?parseFloat(r.sqm):null, pricePerSqm:r.price_per_sqm?parseFloat(r.price_per_sqm):null,
     salePrice:r.sale_price?parseFloat(r.sale_price):null, purchaser:r.purchaser, vendor:r.vendor,
