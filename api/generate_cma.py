@@ -411,7 +411,17 @@ def draw_property_row(c, y, row_h, prop, api_key):
     ph_y = y + 5
     c.setFillColor(LGREY)
     c.roundRect(x, ph_y, ph_w, ph_h, 3, fill=1, stroke=0)
-    sv = fetch_streetview(prop.get('address', ''), api_key, size='240x150')
+    # Prefer an uploaded property photo; fall back to Street View
+    sv = None
+    b64p = prop.get('photo_b64')
+    if b64p:
+        try:
+            import base64 as _b64
+            sv = Image.open(io.BytesIO(_b64.b64decode(b64p))).convert('RGB')
+        except Exception:
+            sv = None
+    if sv is None:
+        sv = fetch_streetview(prop.get('address', ''), api_key, size='240x150')
     if sv:
         tw, th = sv.size
         target = ph_w / ph_h
