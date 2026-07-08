@@ -1045,12 +1045,15 @@ async function graphPutBinary(path,blob,contentType){
 }
 // Resolve the workbook's drive + item ids from the shared URL (cached on cfg)
 async function ensureDriveResolved(){
-  if(cfg._driveId&&cfg._itemId)return;
+  // NB: other code paths cache _driveId/_itemId without _parentFolderId,
+  // so all three must be present before we can skip the lookup
+  if(cfg._driveId&&cfg._itemId&&cfg._parentFolderId)return;
   const encoded='u!'+btoa(EXCEL_URL).replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,'');
   const driveItem=await graphGet(`/shares/${encoded}/driveItem`);
   cfg._driveId=driveItem.parentReference?.driveId;
   cfg._itemId=driveItem.id;
   cfg._parentFolderId=driveItem.parentReference?.id;
+  if(!cfg._driveId||!cfg._parentFolderId)throw new Error('Could not resolve the workbook folder on OneDrive');
 }
 // Ensure the "PropCMA Photos" folder exists next to the workbook; returns folder id
 async function ensurePhotoFolder(){
