@@ -704,6 +704,45 @@ function svThumb(address){
   if(!url)return '<div class="sv-thumb-placeholder" title="Add a Google Maps API key in Settings to show Street View photos"><i class="ti ti-photo-off" aria-hidden="true"></i></div>';
   return `<img class="sv-thumb" src="${url}" alt="Street view" loading="lazy" onerror="this.outerHTML='<div class=&quot;sv-thumb-placeholder&quot; title=&quot;No Street View image available&quot;><i class=&quot;ti ti-photo-off&quot;></i></div>'">`;
 }
+function firstPhoto(p){return(p.photos||'').split(',').map(s=>s.trim()).filter(Boolean)[0]||null;}
+const PHOTO_ERR_FALLBACK="this.outerHTML='<div class=&quot;sv-thumb-placeholder&quot; title=&quot;Photo unavailable&quot;><i class=&quot;ti ti-photo-off&quot;></i></div>'";
+function propThumb(p){
+  const ph=firstPhoto(p);
+  if(ph){
+    if(ph.startsWith('graph://'))
+      return `<img class="sv-thumb" data-gref="${ph.replace(/"/g,'&quot;')}" alt="Property photo" onerror="${PHOTO_ERR_FALLBACK}">`;
+    if(/^https?:\/\//.test(ph))
+      return `<img class="sv-thumb" src="${ph.replace(/"/g,'&quot;')}" alt="Property photo" loading="lazy" onerror="${PHOTO_ERR_FALLBACK}">`;
+  }
+  return svThumb(p.address);
+}
+// Lazily resolve OneDrive (graph://) thumbnails only when rows scroll into view,
+// with a session cache so re-renders and repeat rows don't re-hit the Graph API
+const _photoThumbCache=new Map();
+const _thumbObserver=('IntersectionObserver'in window)?new IntersectionObserver(entries=>{
+  entries.forEach(en=>{
+    if(!en.isIntersecting)return;
+    const img=en.target;
+    _thumbObserver.unobserve(img);
+    const ref=img.dataset.gref;
+    if(!ref||img.src)return;
+    if(!_photoThumbCache.has(ref))_photoThumbCache.set(ref,resolveGraphPhotoUrl(ref));
+    _photoThumbCache.get(ref).then(u=>{
+      if(u)img.src=u;
+      else img.outerHTML='<div class="sv-thumb-placeholder" title="Photo unavailable"><i class="ti ti-photo-off" aria-hidden="true"></i></div>';
+    });
+  });
+},{rootMargin:'200px'}):null;
+function hydrateGraphThumbs(){
+  document.querySelectorAll('img[data-gref]:not([src])').forEach(img=>{
+    if(_thumbObserver)_thumbObserver.observe(img);
+    else{ // very old browser fallback: resolve immediately
+      const ref=img.dataset.gref;
+      if(!_photoThumbCache.has(ref))_photoThumbCache.set(ref,resolveGraphPhotoUrl(ref));
+      _photoThumbCache.get(ref).then(u=>{if(u)img.src=u;});
+    }
+  });
+}
 function addrLink(address){
   if(!address||address==='—')return '—';
   const display=address.length>40?address.slice(0,40)+'…':address;
@@ -1236,15 +1275,28 @@ const EXCEL_EDIT_FIELDS=[
   {key:'pricePerSqm',  col:'Price per SQM',     get:p=>p.pricePerSqm!=null?String(Math.round(p.pricePerSqm*100)/100):''},
   {key:'salePrice',    col:'Sale Price',        get:p=>p.salePrice!=null?String(p.salePrice):''},
 ];
-// Resolve write columns for a property, incl. splitting Broker across Broker 1–4 columns
+// Resolve write columns for a property, incl. splitting Broker across Broker 1–4 columns.
+// Only fields that changed since the edit panel opened are written — this keeps the
+// number of Graph calls small and avoids Excel workbook lock contention.
 function excelWriteCols(prop){
-  const cols=EXCEL_EDIT_FIELDS.map(f=>[(f.key&&cfg.colMap[f.key])||f.col,f.get(prop)]);
-  const brokers=(prop.broker||'').split(';').map(s=>s.trim());
-  const mapped=BROKER_FIELDS.map(b=>cfg.colMap[b.key]).filter(Boolean);
-  if(mapped.length){
-    mapped.forEach((colName,i)=>cols.push([colName,brokers[i]||'']));
-  }else{
-    cols.push([cfg.colMap.broker||'Broker',(prop.broker||'')]);
+  const cm=cfg.colMap||{};
+  const snap=editingSnapshot;
+  const now=snapshotProp(prop);
+  const changed=k=>!snap||JSON.stringify(snap[k])!==JSON.stringify(now[k]);
+  const fieldKeyMap={sqm:'sqm',landArea:'landArea',annualRent:'annualRent',initialYield:'initialYield',
+    category:'category',auction:'auction',pricePerSqm:'pricePerSqm',salePrice:'salePrice'};
+  const snapKeyFor=f=>f.key?fieldKeyMap[f.key]||f.key:(f.col==='Notes'?'notes':f.col==='Photos'?'photos':null);
+  const cols=[];
+  for(const f of EXCEL_EDIT_FIELDS){
+    const sk=snapKeyFor(f);
+    if(sk&&!changed(sk))continue;
+    cols.push([(f.key&&cm[f.key])||f.col,f.get(prop)]);
+  }
+  if(changed('broker')){
+    const brokers=(prop.broker||'').split(';').map(s=>s.trim());
+    const mapped=BROKER_FIELDS.map(b=>cm[b.key]).filter(Boolean);
+    if(mapped.length)mapped.forEach((colName,i)=>cols.push([colName,brokers[i]||'']));
+    else cols.push([cm.broker||'Broker',(prop.broker||'')]);
   }
   return cols;
 }
@@ -1309,7 +1361,19 @@ async function writePropertyToExcel(prop){
     // Write each edit field as a single-cell PATCH
     // Graph API cell address format: /range(address='SheetName!A2')
     const base=`/drives/${cfg._driveId}/items/${cfg._itemId}/workbook/worksheets/${encodeURIComponent(sn)}`;
-    const writes=writeCols.map(async([colName,val])=>{
+    // Write cells SEQUENTIALLY with retry — parallel PATCHes trip the Excel
+    // workbook's lock and Graph throttling (409/423/429), which caused
+    // intermittent "Excel write failed" errors.
+    const patchWithRetry=async(path,body)=>{
+      for(let attempt=0;attempt<3;attempt++){
+        try{return await graphPatch(path,body);}
+        catch(e){
+          if(attempt===2)throw e;
+          await new Promise(r=>setTimeout(r,600*(attempt+1)));
+        }
+      }
+    };
+    for(const[colName,val]of writeCols){
       let ci=headers.indexOf(colName);
       if(ci<0){
         // Column doesn't exist yet — append it
@@ -1317,13 +1381,11 @@ async function writePropertyToExcel(prop){
         cfg._headers=headers;
         ci=headers.length-1;
         // Write the header cell first
-        await graphPatch(`${base}/cell(row=0,column=${ci})`,{values:[[colName]]});
+        await patchWithRetry(`${base}/cell(row=0,column=${ci})`,{values:[[colName]]});
       }
       // Use 0-based row/column cell API — more reliable than address strings
-      return graphPatch(`${base}/cell(row=${rowNum-1},column=${ci})`,{values:[[val]]});
-    });
-
-    await Promise.all(writes);
+      await patchWithRetry(`${base}/cell(row=${rowNum-1},column=${ci})`,{values:[[val]]});
+    }
     return true;
   }catch(e){
     console.error('Excel write error:',e.message,e);
@@ -1552,7 +1614,7 @@ function renderTable(){
     const catPill=(p.category||'').toLowerCase()==='investment'?'pill-investment':'';
     return `<tr class="${sc}" onclick="toggleRow('${p.id}',event)">
       <td><input type="checkbox" ${chk} onclick="toggleRow('${p.id}',event)"></td>
-      <td class="sv-cell" onclick="event.stopPropagation()">${svThumb(p.address)}</td>
+      <td class="sv-cell" onclick="event.stopPropagation()">${propThumb(p)}</td>
       <td>${addrLink(p.address)}</td>
       <td>${p.saleDate||'—'}</td>
       <td>${catPill?'<span class="pill '+catPill+'">'+p.category+'</span>':(p.category||'—')}</td>
@@ -1567,6 +1629,7 @@ function renderTable(){
       <td><button class="btn btn-sm" onclick="openEdit('${p.id}',event)" title="Edit property"><i class="ti ti-edit" aria-hidden="true"></i></button></td>
     </tr>`;
   }).join('');
+  hydrateGraphThumbs();
 }
 function toggleRow(id,e){e.stopPropagation();selected.has(id)?selected.delete(id):selected.add(id);renderTable();updateCMABar();updateSelCount();}
 function toggleAll(cb){cb.checked?filtered.forEach(p=>selected.add(p.id)):filtered.forEach(p=>selected.delete(p.id));renderTable();updateCMABar();updateSelCount();}
@@ -1849,12 +1912,21 @@ function showToast(msg){const t=document.getElementById('toast');t.textContent=m
 
 // ── Edit panel ────────────────────────────────────────────────
 let editingPropId=null;
+let editingSnapshot=null;  // field values at open — used to write back only what changed
+function snapshotProp(p){
+  return{sqm:p.sqm??null,landArea:p.landArea??null,annualRent:p.annualRent??null,
+    initialYield:p.initialYield??null,notes:p.notes||'',photos:p.photos||'',
+    category:p.category||'',auction:!!p.auction,
+    pricePerSqm:p.pricePerSqm!=null?Math.round(p.pricePerSqm*100)/100:null,
+    salePrice:p.salePrice??null,broker:p.broker||''};
+}
 
 function openEdit(propId,event){
   event.stopPropagation();
   const p=allProperties.find(x=>x.id===propId);
   if(!p)return;
   editingPropId=propId;
+  editingSnapshot=snapshotProp(p);
 
   // Populate read-only context
   document.getElementById('so-title').textContent='Edit property';
