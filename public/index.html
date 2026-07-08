@@ -411,10 +411,16 @@ input[type=checkbox]{cursor:pointer;accent-color:var(--cb);}
               </div>
               <div class="val-result">
                 <div>
-                  <div class="val-result-label">Indicated value</div>
+                  <div class="val-result-label">Estimated value range</div>
                   <div style="font-size:11px;color:rgba(255,255,255,.45);margin-top:2px;" id="val-psm-label">at — $/m²</div>
                 </div>
-                <div class="val-result-num" id="val-result">—</div>
+                <div style="display:flex;align-items:center;gap:8px;">
+                  <input type="number" id="est-low" step="1000" min="0" oninput="updateEstLabels()"
+                    style="width:130px;font-family:var(--mono);font-size:16px;font-weight:600;text-align:right;background:rgba(255,255,255,.12);border:1px solid rgba(255,255,255,.25);color:#fff;border-radius:6px;padding:6px 8px;">
+                  <span style="font-size:18px;color:rgba(255,255,255,.6);">–</span>
+                  <input type="number" id="est-high" step="1000" min="0" oninput="updateEstLabels()"
+                    style="width:130px;font-family:var(--mono);font-size:16px;font-weight:600;text-align:right;background:rgba(255,255,255,.12);border:1px solid rgba(255,255,255,.25);color:#fff;border-radius:6px;padding:6px 8px;">
+                </div>
               </div>
             </div>
             <div class="report-section">
@@ -1471,8 +1477,20 @@ function recalcVal(){
   document.getElementById('adj-size-r').textContent='$'+fmtNum(Math.round(med*(1+size/100)));
   document.getElementById('adj-age-r').textContent='$'+fmtNum(Math.round(med*(1+size/100)*(1+age/100)));
   document.getElementById('adj-loc-r').textContent='$'+fmtNum(Math.round(adj));
-  document.getElementById('val-psm-label').textContent='at $'+fmtNum(Math.round(adj))+'/m²';
-  document.getElementById('val-result').textContent='$'+fmtPrice(Math.round(adj*sqm));
+  // Best practice: present an estimation range of ~10% total spread (±5% around the point estimate)
+  const est=adj*sqm;
+  const rnd=v=>Math.round(v/1000)*1000;  // to nearest $1,000
+  document.getElementById('est-low').value=est?rnd(est*0.95):'';
+  document.getElementById('est-high').value=est?rnd(est*1.05):'';
+  updateEstLabels();
+}
+function updateEstLabels(){
+  const sqm=parseFloat(document.getElementById('subject-sqm').value)||0;
+  const lo=parseFloat(document.getElementById('est-low').value)||0;
+  const hi=parseFloat(document.getElementById('est-high').value)||0;
+  const lbl=document.getElementById('val-psm-label');
+  if(sqm&&lo&&hi)lbl.textContent='at $'+fmtNum(Math.round(lo/sqm))+' – $'+fmtNum(Math.round(hi/sqm))+' /m²';
+  else lbl.textContent='at — $/m²';
 }
 
 // ── Import (manual spreadsheet upload) ─────────────────────────
@@ -1556,6 +1574,8 @@ async function exportPDF(){
     subject_address:document.getElementById('subject-address')?.value.trim()||'',
     subject_sqm:subSqm||null,
     indicated_value:subSqm?Math.round(adj*subSqm):null,
+    estimated_low:parseFloat(document.getElementById('est-low')?.value)||null,
+    estimated_high:parseFloat(document.getElementById('est-high')?.value)||null,
     adjusted_psm:Math.round(adj)||null,
     adjustments:{size,age,location:loc},
     gmaps_key:gmapsKey||'',
