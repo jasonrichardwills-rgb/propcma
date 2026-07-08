@@ -415,24 +415,24 @@ input[type=checkbox]{cursor:pointer;accent-color:var(--cb);}
                   <div style="font-size:11px;color:rgba(255,255,255,.45);margin-top:2px;" id="val-psm-label">at — $/m²</div>
                 </div>
                 <div style="display:flex;align-items:center;gap:8px;">
-                  <input type="number" id="est-low" step="1000" min="0" oninput="updateEstLabels()"
-                    style="width:130px;font-family:var(--mono);font-size:16px;font-weight:600;text-align:right;background:rgba(255,255,255,.12);border:1px solid rgba(255,255,255,.25);color:#fff;border-radius:6px;padding:6px 8px;">
+                  <input type="text" id="est-low" inputmode="numeric" autocomplete="off" placeholder="$0" oninput="onEstInput(this)"
+                    style="width:140px;font-family:var(--mono);font-size:16px;font-weight:600;text-align:right;background:rgba(255,255,255,.12);border:1px solid rgba(255,255,255,.25);color:#fff;border-radius:6px;padding:6px 8px;">
                   <span style="font-size:18px;color:rgba(255,255,255,.6);">–</span>
-                  <input type="number" id="est-high" step="1000" min="0" oninput="updateEstLabels()"
-                    style="width:130px;font-family:var(--mono);font-size:16px;font-weight:600;text-align:right;background:rgba(255,255,255,.12);border:1px solid rgba(255,255,255,.25);color:#fff;border-radius:6px;padding:6px 8px;">
+                  <input type="text" id="est-high" inputmode="numeric" autocomplete="off" placeholder="$0" oninput="onEstInput(this)"
+                    style="width:140px;font-family:var(--mono);font-size:16px;font-weight:600;text-align:right;background:rgba(255,255,255,.12);border:1px solid rgba(255,255,255,.25);color:#fff;border-radius:6px;padding:6px 8px;">
                 </div>
               </div>
             </div>
             <div class="report-section">
               <div class="report-section-title">Comparable sales detail</div>
               <table style="width:100%;border-collapse:collapse;font-size:11px;">
-                <thead><tr style="background:var(--cb-deeper);">
-                  <th style="padding:6px 8px;text-align:left;font-size:10px;text-transform:uppercase;letter-spacing:.06em;color:rgba(255,255,255,.85);font-weight:600;">Address</th>
-                  <th style="padding:6px 8px;text-align:left;font-size:10px;text-transform:uppercase;letter-spacing:.06em;color:rgba(255,255,255,.85);font-weight:600;">Date</th>
-                  <th style="padding:6px 8px;text-align:right;font-size:10px;text-transform:uppercase;letter-spacing:.06em;color:rgba(255,255,255,.85);font-weight:600;">SQM</th>
-                  <th style="padding:6px 8px;text-align:right;font-size:10px;text-transform:uppercase;letter-spacing:.06em;color:rgba(255,255,255,.85);font-weight:600;">Price</th>
-                  <th style="padding:6px 8px;text-align:right;font-size:10px;text-transform:uppercase;letter-spacing:.06em;color:rgba(255,255,255,.85);font-weight:600;">$/m²</th>
-                  <th style="padding:6px 8px;text-align:left;font-size:10px;text-transform:uppercase;letter-spacing:.06em;color:rgba(255,255,255,.85);font-weight:600;">Broker</th>
+                <thead><tr style="border-bottom:2px solid var(--cb);">
+                  <th style="padding:6px 8px;text-align:left;font-size:10px;text-transform:uppercase;letter-spacing:.06em;color:#000;font-weight:700;">Address</th>
+                  <th style="padding:6px 8px;text-align:left;font-size:10px;text-transform:uppercase;letter-spacing:.06em;color:#000;font-weight:700;">Date</th>
+                  <th style="padding:6px 8px;text-align:right;font-size:10px;text-transform:uppercase;letter-spacing:.06em;color:#000;font-weight:700;">SQM</th>
+                  <th style="padding:6px 8px;text-align:right;font-size:10px;text-transform:uppercase;letter-spacing:.06em;color:#000;font-weight:700;">Price</th>
+                  <th style="padding:6px 8px;text-align:right;font-size:10px;text-transform:uppercase;letter-spacing:.06em;color:#000;font-weight:700;">$/m²</th>
+                  <th style="padding:6px 8px;text-align:left;font-size:10px;text-transform:uppercase;letter-spacing:.06em;color:#000;font-weight:700;">Broker</th>
                 </tr></thead>
                 <tbody id="report-comps-body"></tbody>
               </table>
@@ -1722,14 +1722,21 @@ function recalcVal(){
   // Best practice: present an estimation range of ~10% total spread (±5% around the point estimate)
   const est=adj*sqm;
   const rnd=v=>Math.round(v/1000)*1000;  // to nearest $1,000
-  document.getElementById('est-low').value=est?rnd(est*0.95):'';
-  document.getElementById('est-high').value=est?rnd(est*1.05):'';
+  document.getElementById('est-low').value=est?fmtCurrencyInput(rnd(est*0.95)):'';
+  document.getElementById('est-high').value=est?fmtCurrencyInput(rnd(est*1.05)):'';
+  updateEstLabels();
+}
+function parseCurrency(v){const n=Number(String(v||'').replace(/[^\d.]/g,''));return isNaN(n)?0:n;}
+function fmtCurrencyInput(n){return n?'$'+Math.round(n).toLocaleString('en-NZ'):'';}
+function onEstInput(el){
+  const n=parseCurrency(el.value);
+  el.value=n?fmtCurrencyInput(n):'';
   updateEstLabels();
 }
 function updateEstLabels(){
   const sqm=parseFloat(document.getElementById('subject-sqm').value)||0;
-  const lo=parseFloat(document.getElementById('est-low').value)||0;
-  const hi=parseFloat(document.getElementById('est-high').value)||0;
+  const lo=parseCurrency(document.getElementById('est-low').value);
+  const hi=parseCurrency(document.getElementById('est-high').value);
   const lbl=document.getElementById('val-psm-label');
   if(sqm&&lo&&hi)lbl.textContent='at $'+fmtNum(Math.round(lo/sqm))+' – $'+fmtNum(Math.round(hi/sqm))+' /m²';
   else lbl.textContent='at — $/m²';
@@ -1816,8 +1823,8 @@ async function exportPDF(){
     subject_address:document.getElementById('subject-address')?.value.trim()||'',
     subject_sqm:subSqm||null,
     indicated_value:subSqm?Math.round(adj*subSqm):null,
-    estimated_low:parseFloat(document.getElementById('est-low')?.value)||null,
-    estimated_high:parseFloat(document.getElementById('est-high')?.value)||null,
+    estimated_low:parseCurrency(document.getElementById('est-low')?.value)||null,
+    estimated_high:parseCurrency(document.getElementById('est-high')?.value)||null,
     adjusted_psm:Math.round(adj)||null,
     adjustments:{size,age,location:loc},
     gmaps_key:gmapsKey||'',
