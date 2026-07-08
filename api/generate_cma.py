@@ -580,25 +580,6 @@ def build_report(data, output_path):
             c.setFillColor(HexColor('#93C5E8'))
             c.drawString(30, box_y + 10, f'{fmt_num(subject_sqm)} m²  floor area')
 
-    # Indicated value block
-    if indicated:
-        iv_y = H - 575
-        c.setFillColor(BLUE)
-        c.roundRect(20, iv_y, panel_w - 40, 80, 4, fill=1, stroke=0)
-        c.setFont('Helvetica', 7)
-        c.setFillColor(HexColor('#B8D9F0'))
-        c.drawString(30, iv_y + 65, 'INDICATED VALUE')
-        c.setFont('Helvetica-Bold', 20)
-        c.setFillColor(WHITE)
-        c.drawString(30, iv_y + 38, fmt_price(indicated))
-        if adj_psm:
-            c.setFont('Helvetica', 8)
-            c.setFillColor(HexColor('#B8D9F0'))
-            c.drawString(30, iv_y + 20, f'at {fmt_psm(adj_psm)}/m²')
-        if subject_sqm:
-            c.setFont('Helvetica', 7)
-            c.drawString(30, iv_y + 8, f'× {fmt_num(subject_sqm)} m²  subject area')
-
     # Stats on cover
     n = stats.get('count', len(props))
     c.setFont('Helvetica', 8)
@@ -609,24 +590,23 @@ def build_report(data, output_path):
     c.setFillColor(HexColor('#E8F2FA'))
     c.rect(panel_w, 0, W - panel_w, H, fill=1, stroke=0)
 
-    # Large stat on right panel
+    # Indicated value — headline stat on the right panel
     right_cx = panel_w + (W - panel_w) / 2
-    c.setFillColor(BLUE)
-    c.setFont('Helvetica-Bold', 38)
-    med_psm = stats.get('median_psm')
-    if med_psm:
-        c.drawCentredString(right_cx, H/2 + 40, fmt_psm(med_psm))
-        c.setFont('Helvetica', 12)
-        c.setFillColor(DGREY)
-        c.drawCentredString(right_cx, H/2 + 18, 'Median $/m²')
-
-    c.setFillColor(NAVY)
-    c.setFont('Helvetica-Bold', 24)
-    if n:
-        c.drawCentredString(right_cx, H/2 - 30, str(n))
+    if indicated:
         c.setFont('Helvetica', 10)
         c.setFillColor(DGREY)
-        c.drawCentredString(right_cx, H/2 - 50, 'Comparable sales')
+        c.drawCentredString(right_cx, H/2 + 62, 'INDICATED VALUE')
+        c.setFillColor(BLUE)
+        c.setFont('Helvetica-Bold', 40)
+        c.drawCentredString(right_cx, H/2 + 24, fmt_price(indicated))
+        c.setFont('Helvetica', 12)
+        c.setFillColor(NAVY)
+        if adj_psm:
+            c.drawCentredString(right_cx, H/2 - 4, f'at {fmt_psm(adj_psm)}/m²')
+        if subject_sqm:
+            c.setFont('Helvetica', 10)
+            c.setFillColor(DGREY)
+            c.drawCentredString(right_cx, H/2 - 24, f'× {fmt_num(subject_sqm)} m²  subject area')
 
     # Footer on cover
     footer(c, 1, total_pages)
