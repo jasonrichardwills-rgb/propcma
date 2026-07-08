@@ -342,6 +342,142 @@ def draw_property_card(c, x, y, cw, ch, prop, api_key):
     c.drawString(x + pad, bottom_y, info)
 
 
+# ── Comparable sales table (page 3+) ─────────────────────────
+from datetime import datetime
+
+def fmt_full_date(s):
+    """Format a sale date as 'Friday, 26 June 2026'. Falls back to raw string."""
+    if not s: return '—'
+    s = str(s).strip()
+    for f in ('%d/%m/%Y', '%d-%m-%Y', '%d.%m.%Y', '%Y-%m-%d', '%d %b %Y', '%d %B %Y'):
+        try:
+            d = datetime.strptime(s, f)
+            return d.strftime('%A, %-d %B %Y')
+        except ValueError:
+            pass
+    for f in ('%b %Y', '%B %Y', '%m/%Y', '%m-%Y'):
+        try:
+            d = datetime.strptime(s, f)
+            return d.strftime('%B %Y')
+        except ValueError:
+            pass
+    return s
+
+def _wrap(c, text, font, size, max_w, max_lines=2):
+    """Word-wrap text to max_w points; returns list of lines (ellipsised)."""
+    words = str(text).split()
+    lines, line = [], ''
+    for w in words:
+        test = (line + ' ' + w).strip()
+        if c.stringWidth(test, font, size) <= max_w:
+            line = test
+        else:
+            if line: lines.append(line)
+            line = w
+    if line: lines.append(line)
+    if len(lines) > max_lines:
+        lines = lines[:max_lines]
+        while lines[-1] and c.stringWidth(lines[-1] + '…', font, size) > max_w:
+            lines[-1] = lines[-1][:-1]
+        lines[-1] += '…'
+    return lines or ['—']
+
+# Table geometry — margins and column widths (photo, address, $/m², SQM, price, date, broker)
+TBL_X = 20
+TBL_COLS = [120, 112, 48, 52, 58, 95, 70]   # sums to 555 = A4 width - 2*20
+
+def draw_table_header(c, y):
+    """Bold navy column headers, per the layout document."""
+    labels = ['', 'Address', '$/m²', 'SQM', 'Sale Price', 'Date Sold', 'Broker Name']
+    c.setFont('Helvetica-Bold', 10)
+    c.setFillColor(NAVY)
+    x = TBL_X
+    for w, lbl in zip(TBL_COLS, labels):
+        if lbl:
+            c.drawString(x + 4, y, lbl)
+        x += w
+    # rule under the header
+    c.setStrokeColor(NAVY)
+    c.setLineWidth(0.8)
+    c.line(TBL_X, y - 5, TBL_X + sum(TBL_COLS), y - 5)
+
+def draw_property_row(c, y, row_h, prop, api_key):
+    """One table row: photo w/ badges, then detail columns. y = row bottom."""
+    x = TBL_X
+    pad = 4
+    # ── Photo cell with category + sale badges ──
+    ph_h = row_h - 10
+    ph_w = TBL_COLS[0] - 8
+    ph_y = y + 5
+    c.setFillColor(LGREY)
+    c.roundRect(x, ph_y, ph_w, ph_h, 3, fill=1, stroke=0)
+    sv = fetch_streetview(prop.get('address', ''), api_key, size='240x150')
+    if sv:
+        tw, th = sv.size
+        target = ph_w / ph_h
+        if tw / th > target:
+            nw = int(th * target); left = (tw - nw) // 2
+            sv = sv.crop((left, 0, left + nw, th))
+        else:
+            nh = int(tw / target); top = (th - nh) // 3
+            sv = sv.crop((0, top, tw, top + nh))
+        c.drawImage(pil_to_rl(sv), x, ph_y, width=ph_w, height=ph_h,
+                    preserveAspectRatio=False, mask='auto')
+    else:
+        c.setFont('Helvetica', 6.5)
+        c.setFillColor(DGREY)
+        c.drawCentredString(x + ph_w/2, ph_y + ph_h/2 - 2, 'No image')
+    # Category badge — navy pill, white text (top-left of photo)
+    cat = (prop.get('category') or '').upper()
+    bx = x + 3
+    by = ph_y + ph_h - 14
+    if cat:
+        bw = c.stringWidth(cat, 'Helvetica-Bold', 6.5) + 10
+        c.setFillColor(NAVY)
+        c.roundRect(bx, by, bw, 11, 2.5, fill=1, stroke=0)
+        c.setFont('Helvetica-Bold', 6.5)
+        c.setFillColor(WHITE)
+        c.drawCentredString(bx + bw/2, by + 3, cat)
+        bx += bw + 3
+    # Sale / Lease badge — green (sale) or amber (lease)
+    ls = prop.get('lease_or_sale', '')
+    if ls:
+        ls_col = HexColor('#166534') if ls == 'Sale' else HexColor('#854d0e')
+        ls_bg  = HexColor('#dcfce7') if ls == 'Sale' else HexColor('#fef9c3')
+        bw = c.stringWidth(ls, 'Helvetica-Bold', 6.5) + 10
+        c.setFillColor(ls_bg)
+        c.roundRect(bx, by, bw, 11, 2.5, fill=1, stroke=0)
+        c.setFont('Helvetica-Bold', 6.5)
+        c.setFillColor(ls_col)
+        c.drawCentredString(bx + bw/2, by + 3, ls)
+
+    # ── Detail columns — navy text, vertically centred ──
+    cy_mid = y + row_h / 2
+    x = TBL_X + TBL_COLS[0]
+    cells = [
+        ('Helvetica', 8.5, _wrap(c, prop.get('address') or '—', 'Helvetica', 8.5, TBL_COLS[1] - pad*2)),
+        ('Helvetica', 8.5, [fmt_psm(prop.get('price_per_sqm'))]),
+        ('Helvetica', 8.5, [fmt_num(prop.get('sqm'))]),
+        ('Helvetica', 8.5, [fmt_price(prop.get('sale_price'))]),
+        ('Helvetica', 8.5, _wrap(c, fmt_full_date(prop.get('sale_date')), 'Helvetica', 8.5, TBL_COLS[5] - pad*2)),
+        ('Helvetica', 8.5, _wrap(c, prop.get('broker') or '—', 'Helvetica', 8.5, TBL_COLS[6] - pad*2)),
+    ]
+    c.setFillColor(NAVY)
+    for w, (font, size, lines) in zip(TBL_COLS[1:], cells):
+        c.setFont(font, size)
+        lh = size + 2.5
+        block_h = lh * len(lines)
+        ty = cy_mid + block_h/2 - size
+        for ln in lines:
+            c.drawString(x + pad, ty, ln)
+            ty -= lh
+        x += w
+    # Row separator
+    c.setStrokeColor(MGREY)
+    c.setLineWidth(0.4)
+    c.line(TBL_X, y, TBL_X + sum(TBL_COLS), y)
+
+
 # ── Main report builder ───────────────────────────────────────
 
 def build_report(data, output_path):
@@ -356,8 +492,8 @@ def build_report(data, output_path):
     indicated = data.get('indicated_value')
     adj_psm = data.get('adjusted_psm')
 
-    # Count pages: 1 cover + 1 summary + N grid pages (3 cols x 2 rows = 6 per page)
-    per_page = 6
+    # Count pages: 1 cover + 1 summary + N table pages (8 rows per page)
+    per_page = 8
     grid_pages = max(1, -(-len(props) // per_page))  # ceiling div
     total_pages = 2 + grid_pages
 
@@ -618,41 +754,32 @@ def build_report(data, output_path):
     footer(c, 2, total_pages)
     c.showPage()
 
-    # ── PAGES 3+: PROPERTY GRID ──────────────────────────────
-    cols = 3
-    rows = 2
-    per_page = cols * rows
-    gm = 16   # grid margin
-    gap = 8   # gap between cards
+    # ── PAGES 3+: COMPARABLE SALES TABLE ─────────────────────
     header_h = 52
-    footer_h = 24
-    available_h = H - header_h - footer_h - gm*2
-    available_w = W - gm*2
-    card_w = (available_w - gap*(cols-1)) / cols
-    card_h = (available_h - gap*(rows-1)) / rows
-
     for pg_idx in range(grid_pages):
         page_num = pg_idx + 3
         page_props = props[pg_idx * per_page : (pg_idx+1) * per_page]
 
         header_bar(c, f'Comparable Sales — page {pg_idx + 1}')
 
-        # Section label
+        # Section title
         c.setFont('Helvetica-Bold', 14)
         c.setFillColor(NAVY)
-        c.drawString(gm, H - header_h - 18, 'Comparable Sales')
+        c.drawString(TBL_X, H - header_h - 18, 'Comparable Sales')
         c.setStrokeColor(BLUE)
         c.setLineWidth(1.5)
-        c.line(gm, H - header_h - 24, W - gm, H - header_h - 24)
+        c.line(TBL_X, H - header_h - 24, W - TBL_X, H - header_h - 24)
 
-        grid_top = H - header_h - 34
+        # Column headers
+        hdr_y = H - header_h - 42
+        draw_table_header(c, hdr_y)
 
+        # Rows
+        table_top = hdr_y - 8
+        row_h = (table_top - 32) / per_page   # 32pt clearance above footer
         for i, prop in enumerate(page_props):
-            col = i % cols
-            row = i // cols
-            cx = gm + col * (card_w + gap)
-            cy = grid_top - (row + 1) * card_h - row * gap
-            draw_property_card(c, cx, cy, card_w, card_h, prop, api_key)
+            ry = table_top - (i + 1) * row_h
+            draw_property_row(c, ry, row_h, prop, api_key)
 
         footer(c, page_num, total_pages)
         c.showPage()
