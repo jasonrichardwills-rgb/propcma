@@ -490,6 +490,13 @@ def build_report(data, output_path):
     prepared_for = data.get('prepared_for', '')
     subject_sqm = data.get('subject_sqm')
     indicated = data.get('indicated_value')
+    est_low  = data.get('estimated_low')
+    est_high = data.get('estimated_high')
+    if not (est_low and est_high) and indicated:
+        est_low  = round(indicated * 0.95 / 1000) * 1000
+        est_high = round(indicated * 1.05 / 1000) * 1000
+    psm_low  = round(est_low  / subject_sqm) if (est_low  and subject_sqm) else None
+    psm_high = round(est_high / subject_sqm) if (est_high and subject_sqm) else None
     adj_psm = data.get('adjusted_psm')
 
     # Count pages: 1 cover + 1 summary + N table pages (8 rows per page)
@@ -590,23 +597,23 @@ def build_report(data, output_path):
     c.setFillColor(HexColor('#E8F2FA'))
     c.rect(panel_w, 0, W - panel_w, H, fill=1, stroke=0)
 
-    # Indicated value — headline stat on the right panel
+    # Estimated value range — headline stat on the right panel
     right_cx = panel_w + (W - panel_w) / 2
-    if indicated:
+    if est_low and est_high:
         c.setFont('Helvetica', 10)
         c.setFillColor(DGREY)
-        c.drawCentredString(right_cx, H/2 + 62, 'INDICATED VALUE')
+        c.drawCentredString(right_cx, H/2 + 62, 'ESTIMATED VALUE')
         c.setFillColor(BLUE)
-        c.setFont('Helvetica-Bold', 40)
-        c.drawCentredString(right_cx, H/2 + 24, fmt_price(indicated))
+        c.setFont('Helvetica-Bold', 24)
+        c.drawCentredString(right_cx, H/2 + 28, f'{fmt_price(est_low)} – {fmt_price(est_high)}')
         c.setFont('Helvetica', 12)
         c.setFillColor(NAVY)
-        if adj_psm:
-            c.drawCentredString(right_cx, H/2 - 4, f'at {fmt_psm(adj_psm)}/m²')
+        if psm_low and psm_high:
+            c.drawCentredString(right_cx, H/2 + 2, f'at {fmt_psm(psm_low)} – {fmt_psm(psm_high)} /m²')
         if subject_sqm:
             c.setFont('Helvetica', 10)
             c.setFillColor(DGREY)
-            c.drawCentredString(right_cx, H/2 - 24, f'× {fmt_num(subject_sqm)} m²  subject area')
+            c.drawCentredString(right_cx, H/2 - 18, f'× {fmt_num(subject_sqm)} m²  subject area')
 
     # Footer on cover
     footer(c, 1, total_pages)
@@ -658,14 +665,16 @@ def build_report(data, output_path):
     c.roundRect(20, iv_y, W - 40, 52, 4, fill=1, stroke=0)
     c.setFont('Helvetica', 7)
     c.setFillColor(HexColor('#93C5E8'))
-    c.drawString(30, iv_y + 40, 'INDICATED VALUE — SUBJECT PROPERTY')
+    c.drawString(30, iv_y + 40, 'ESTIMATED VALUE — SUBJECT PROPERTY')
     c.setFont('Helvetica-Bold', 18)
     c.setFillColor(WHITE)
-    c.drawString(30, iv_y + 16, fmt_price(indicated) if indicated else '—')
-    if adj_psm and subject_sqm:
+    rng = f'{fmt_price(est_low)} – {fmt_price(est_high)}' if (est_low and est_high) else '—'
+    c.drawString(30, iv_y + 16, rng)
+    if psm_low and psm_high and subject_sqm:
         c.setFont('Helvetica', 9)
         c.setFillColor(HexColor('#B8D9F0'))
-        c.drawString(120, iv_y + 20, f'at {fmt_psm(adj_psm)}/m²  ×  {fmt_num(subject_sqm)} m²  subject area')
+        c.drawString(30 + c.stringWidth(rng, 'Helvetica-Bold', 18) + 16, iv_y + 20,
+                     f'at {fmt_psm(psm_low)} – {fmt_psm(psm_high)} /m²  ×  {fmt_num(subject_sqm)} m²  subject area')
     if subject:
         c.setFont('Helvetica', 8)
         c.setFillColor(HexColor('#93C5E8'))
