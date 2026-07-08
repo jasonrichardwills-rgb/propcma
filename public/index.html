@@ -568,7 +568,11 @@ input[type=checkbox]{cursor:pointer;accent-color:var(--cb);}
       <div class="edit-field"><label>Category</label><select id="so-category"></select></div>
     </div>
     <div class="edit-row-pair">
-      <div class="edit-field"><label>Sale Price</label><div class="edit-read-field" id="so-price-display">—</div></div>
+      <div class="edit-field">
+        <label>Sale Price ($)</label>
+        <div class="edit-read-field" id="so-price-display" style="display:none;">—</div>
+        <input type="number" id="so-price" placeholder="e.g. 2500000" min="0" step="1000" style="display:none;">
+      </div>
       <div class="edit-field"><label>Lease / Sale</label><div class="edit-read-field" id="so-ls-display">—</div></div>
     </div>
     <div class="edit-row-pair">
@@ -1123,6 +1127,7 @@ const EXCEL_EDIT_FIELDS=[
   {key:'category',     col:'Category',          get:p=>p.category||''},
   {key:'auction',      col:'Auction',           get:p=>p.auction?'Yes':'No'},
   {key:'pricePerSqm',  col:'Price per SQM',     get:p=>p.pricePerSqm!=null?String(Math.round(p.pricePerSqm*100)/100):''},
+  {key:'salePrice',    col:'Sale Price',        get:p=>p.salePrice!=null?String(p.salePrice):''},
 ];
 // Resolve write columns for a property, incl. splitting Broker across Broker 1–4 columns
 function excelWriteCols(prop){
@@ -1744,7 +1749,7 @@ function openEdit(propId,event){
   };
   setDual('so-psm',p.pricePerSqm!=null,p.pricePerSqm!=null?'$'+fmtNum(Math.round(p.pricePerSqm)):'');
   setDual('so-broker',!!(p.broker&&p.broker.trim()),p.broker||'');
-  document.getElementById('so-price-display').textContent=p.salePrice?'$'+fmtPrice(p.salePrice):'—';
+  setDual('so-price',p.salePrice!=null,p.salePrice!=null?'$'+fmtPrice(p.salePrice):'');
   document.getElementById('so-ls-display').textContent=p.leaseOrSale||'—';
 
   // Populate editable fields
@@ -1828,7 +1833,9 @@ async function saveEdit(){
   // Category & auction — always editable
   p.category=document.getElementById('so-category').value||null;
   p.auction=document.getElementById('so-auction').value==='Yes';
-  // Price per SQM & Broker — only editable when they were empty
+  // Sale Price, Price per SQM & Broker — only editable when they were empty
+  const priceInp=document.getElementById('so-price');
+  if(priceInp.style.display!=='none'&&priceInp.value!=='')p.salePrice=parseFloat(priceInp.value);
   let manualPsm=false;
   const psmInp=document.getElementById('so-psm');
   if(psmInp.style.display!=='none'&&psmInp.value!==''){p.pricePerSqm=parseFloat(psmInp.value);manualPsm=true;}
