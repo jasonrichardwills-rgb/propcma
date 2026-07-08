@@ -1304,8 +1304,11 @@ function excelWriteCols(prop){
   return cols;
 }
 
+let lastExcelWriteError='';
 async function writePropertyToExcel(prop){
+  lastExcelWriteError='';
   if(!msToken){
+    lastExcelWriteError='not signed in to Microsoft';
     document.getElementById('so-sheets-status').style.display='';
     return false;
   }
@@ -1328,6 +1331,7 @@ async function writePropertyToExcel(prop){
       }
     }catch(e){
       console.error('Excel resolve error:',e);
+      lastExcelWriteError='could not open workbook — '+e.message;
       document.getElementById('so-sheets-status').style.display='';
       return false;
     }
@@ -1339,7 +1343,21 @@ async function writePropertyToExcel(prop){
 
     // Add missing edit columns to the sheet header row
     const writeCols=excelWriteCols(prop);
-    const needed=writeCols.map(([c])=>c).filter(c=>!headers.includes(c));
+    let needed=writeCols.map(([c])=>c).filter(c=>!headers.includes(c));
+    if(needed.length){
+      // The header cache may be stale (e.g. a column added in an earlier session or
+      // by another user) — refresh the live header row before appending anything,
+      // otherwise we'd rewrite the header row from outdated data and misalign cells
+      try{
+        const hdrData=await graphGet(
+          `/drives/${cfg._driveId}/items/${cfg._itemId}/workbook/worksheets/${encodeURIComponent(sn)}/range(address='A1:ZZ1')`
+        );
+        let hrow=(hdrData.values||[[]])[0].map(v=>String(v??''));
+        while(hrow.length&&hrow[hrow.length-1]==='')hrow.pop();
+        if(hrow.length){headers=hrow;cfg._headers=headers;}
+      }catch(e){console.warn('Header refresh failed, using cache:',e.message);}
+      needed=writeCols.map(([c])=>c).filter(c=>!headers.includes(c));
+    }
     if(needed.length){
       const newHeaders=[...headers,...needed];
       // IMPORTANT: must patch an explicit range address — never usedRange.
@@ -1357,6 +1375,7 @@ async function writePropertyToExcel(prop){
     const rowNum=parseInt((prop.id||'').replace('xl_',''));
     if(isNaN(rowNum)||rowNum<2){
       console.warn('Excel write: no valid row number for prop id',prop.id);
+      lastExcelWriteError='no spreadsheet row for this record ('+prop.id+') — likely added outside the sheet';
       document.getElementById('so-sheets-status').style.display='';
       return false;
     }
@@ -1392,6 +1411,7 @@ async function writePropertyToExcel(prop){
     return true;
   }catch(e){
     console.error('Excel write error:',e.message,e);
+    lastExcelWriteError=e.message||'unknown error';
     return false;
   }
 }
@@ -2073,7 +2093,7 @@ async function saveEdit(){
   }
 
   btn.disabled=false;btn.innerHTML='<i class="ti ti-check" aria-hidden="true"></i> Save changes';
-  const sheetMsg=msToken?(sheetOk?' + Excel updated':' (Excel write failed)'):'';
+  const sheetMsg=msToken?(sheetOk?' + Excel updated':' (Excel write failed: '+(lastExcelWriteError||'unknown')+')'):'';
   status.textContent='✓ Saved'+sheetMsg;
   showToast('Property updated'+(sheetOk?' and written to Excel':''));
 
