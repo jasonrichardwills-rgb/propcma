@@ -623,7 +623,12 @@ input[type=checkbox]{cursor:pointer;accent-color:var(--cb);}
     <div class="edit-section-title">Photos</div>
     <p style="font-size:12px;color:var(--ink3);margin-bottom:10px;">Paste public image URLs (Google Drive, Dropbox, etc.). Each is saved as a comma-separated list and written back to your sheet.</p>
     <div class="photo-list" id="so-photo-list"></div>
-    <button class="btn btn-sm" onclick="addPhotoRow()" style="margin-bottom:10px;"><i class="ti ti-plus" aria-hidden="true"></i> Add photo URL</button>
+    <div style="display:flex;gap:8px;margin-bottom:10px;">
+      <button class="btn btn-sm" onclick="document.getElementById('so-photo-file').click()"><i class="ti ti-upload" aria-hidden="true"></i> Upload photo</button>
+      <button class="btn btn-sm" onclick="addPhotoRow()"><i class="ti ti-plus" aria-hidden="true"></i> Add photo URL</button>
+      <span class="save-status" id="so-photo-status"></span>
+    </div>
+    <input type="file" id="so-photo-file" accept="image/*" style="display:none;" onchange="handlePhotoUpload(this)">
     <div class="photo-previews" id="so-photo-previews"></div>
 
     <!-- Excel sync status -->
@@ -979,6 +984,108 @@ async function graphGet(path){
   });
   if(!res.ok){const e=await res.json().catch(()=>({}));throw new Error(e?.error?.message||'Graph error '+res.status);}
   return res.json();
+}
+
+async function graphGetBlob(path){
+  const token=await refreshMsToken();
+  if(!token)throw new Error('Not signed in to Microsoft');
+  const res=await fetch('https://graph.microsoft.com/v1.0'+path,{headers:{'Authorization':'Bearer '+token}});
+  if(!res.ok)throw new Error('Graph error '+res.status);
+  return res.blob();
+}
+async function graphPutBinary(path,blob,contentType){
+  const token=await refreshMsToken();
+  if(!token)throw new Error('Not signed in to Microsoft');
+  const res=await fetch('https://graph.microsoft.com/v1.0'+path,{
+    method:'PUT',
+    headers:{'Authorization':'Bearer '+token,'Content-Type':contentType||'application/octet-stream'},
+    body:blob,
+  });
+  if(!res.ok){const e=await res.json().catch(()=>({}));throw new Error(e?.error?.message||'Graph error '+res.status);}
+  return res.json();
+}
+// Resolve the workbook's drive + item ids from the shared URL (cached on cfg)
+async function ensureDriveResolved(){
+  if(cfg._driveId&&cfg._itemId)return;
+  const encoded='u!'+btoa(EXCEL_URL).replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,'');
+  const driveItem=await graphGet(`/shares/${encoded}/driveItem`);
+  cfg._driveId=driveItem.parentReference?.driveId;
+  cfg._itemId=driveItem.id;
+  cfg._parentFolderId=driveItem.parentReference?.id;
+}
+// Ensure the "PropCMA Photos" folder exists next to the workbook; returns folder id
+async function ensurePhotoFolder(){
+  if(cfg._photoFolderId)return cfg._photoFolderId;
+  await ensureDriveResolved();
+  const token=await refreshMsToken();
+  const res=await fetch(`https://graph.microsoft.com/v1.0/drives/${cfg._driveId}/items/${cfg._parentFolderId}/children`,{
+    method:'POST',
+    headers:{'Authorization':'Bearer '+token,'Content-Type':'application/json'},
+    body:JSON.stringify({name:'PropCMA Photos',folder:{},'@microsoft.graph.conflictBehavior':'fail'}),
+  });
+  if(res.ok){cfg._photoFolderId=(await res.json()).id;return cfg._photoFolderId;}
+  // Folder already exists — look it up by path
+  const existing=await graphGet(`/drives/${cfg._driveId}/items/${cfg._parentFolderId}:/PropCMA Photos`);
+  cfg._photoFolderId=existing.id;
+  return cfg._photoFolderId;
+}
+// Downscale an image Blob/File to a JPEG data URL (max width, quality)
+function downscaleImage(blob,maxW,quality){
+  return new Promise((resolve,reject)=>{
+    const url=URL.createObjectURL(blob);
+    const img=new Image();
+    img.onload=()=>{
+      const scale=Math.min(1,maxW/img.width);
+      const cw=Math.round(img.width*scale),ch=Math.round(img.height*scale);
+      const cv=document.createElement('canvas');cv.width=cw;cv.height=ch;
+      cv.getContext('2d').drawImage(img,0,0,cw,ch);
+      URL.revokeObjectURL(url);
+      resolve(cv.toDataURL('image/jpeg',quality||0.85));
+    };
+    img.onerror=()=>{URL.revokeObjectURL(url);reject(new Error('Image load failed'));};
+    img.src=url;
+  });
+}
+function dataUrlToBlob(dataUrl){
+  const[meta,b64]=dataUrl.split(',');
+  const mime=meta.match(/data:([^;]+)/)[1];
+  const bin=atob(b64);const arr=new Uint8Array(bin.length);
+  for(let i=0;i<bin.length;i++)arr[i]=bin.charCodeAt(i);
+  return new Blob([arr],{type:mime});
+}
+// Upload a photo to OneDrive and add a graph:// reference to the photo list
+async function handlePhotoUpload(input){
+  const file=input.files&&input.files[0];
+  input.value='';
+  if(!file)return;
+  const status=document.getElementById('so-photo-status');
+  if(!msToken){showToast('Sign in to Microsoft first (Settings)');return;}
+  status.textContent='Uploading…';
+  try{
+    const dataUrl=await downscaleImage(file,1600,0.85);
+    const blob=dataUrlToBlob(dataUrl);
+    const folderId=await ensurePhotoFolder();
+    const safeName=(editingPropId||'photo').replace(/[^a-z0-9_\-]/gi,'')+'_'+Date.now()+'.jpg';
+    const item=await graphPutBinary(`/drives/${cfg._driveId}/items/${folderId}:/${safeName}:/content`,blob,'image/jpeg');
+    // Remove a single empty placeholder row before adding
+    const rows=Array.from(document.querySelectorAll('#so-photo-list input'));
+    if(rows.length===1&&!rows[0].value.trim())rows[0].parentElement.remove();
+    addPhotoRow(`graph://${cfg._driveId}/${item.id}`);
+    renderPhotoPreviews();
+    status.textContent='✓ Uploaded — save changes to keep';
+  }catch(e){
+    console.error('Photo upload:',e);
+    status.textContent='⚠ Upload failed: '+e.message;
+  }
+}
+// Resolve a graph:// photo reference to a displayable thumbnail URL
+async function resolveGraphPhotoUrl(ref){
+  try{
+    const m=ref.match(/^graph:\/\/([^\/]+)\/(.+)$/);if(!m)return null;
+    const t=await graphGet(`/drives/${m[1]}/items/${m[2]}/thumbnails`);
+    const th=(t.value||[])[0];
+    return th?.large?.url||th?.medium?.url||th?.small?.url||null;
+  }catch(e){return null;}
 }
 
 async function graphPatch(path,body){
@@ -1652,6 +1759,26 @@ async function exportPDF(){
     })),
   };
 
+  // Attach each property's first photo as base64 so the PDF can use it instead of Street View
+  await Promise.all(sel.map(async(p,i)=>{
+    const first=(p.photos||'').split(',').map(s=>s.trim()).filter(Boolean)[0];
+    if(!first)return;
+    try{
+      let blob=null;
+      if(first.startsWith('graph://')){
+        const m=first.match(/^graph:\/\/([^\/]+)\/(.+)$/);
+        if(m&&msToken)blob=await graphGetBlob(`/drives/${m[1]}/items/${m[2]}/content`);
+      }else if(/^https?:\/\//.test(first)){
+        const r=await fetch(first).catch(()=>null);
+        if(r&&r.ok)blob=await r.blob();
+      }
+      if(blob){
+        const dataUrl=await downscaleImage(blob,640,0.8);
+        payload.properties[i].photo_b64=dataUrl.split(',')[1];
+      }
+    }catch(e){console.warn('Photo resolve failed for',p.address,e);}
+  }));
+
   try{
     const res=await fetch('/api/generate-pdf',{
       method:'POST',
@@ -1803,7 +1930,15 @@ function getPhotoUrls(){
 function renderPhotoPreviews(){
   const urls=getPhotoUrls();
   const wrap=document.getElementById('so-photo-previews');
-  wrap.innerHTML=urls.map(u=>`<img class="photo-preview-thumb" src="${u}" alt="Photo preview" onerror="this.style.display='none'">`).join('');
+  wrap.innerHTML='';
+  urls.forEach(u=>{
+    const img=document.createElement('img');
+    img.className='photo-preview-thumb';img.alt='Photo preview';
+    img.onerror=()=>{img.style.display='none';};
+    wrap.appendChild(img);
+    if(u.startsWith('graph://'))resolveGraphPhotoUrl(u).then(src=>{if(src)img.src=src;else img.style.display='none';});
+    else img.src=u;
+  });
 }
 
 async function saveEdit(){
