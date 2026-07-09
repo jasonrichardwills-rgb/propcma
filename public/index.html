@@ -477,6 +477,10 @@ input[type=checkbox]{cursor:pointer;accent-color:var(--cb);}
               </div>
               <button class="btn btn-sm btn-danger" onclick="msSignOut()" style="margin-left:auto;"><i class="ti ti-logout" aria-hidden="true"></i> Sign out</button>
             </div>
+            <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px;">
+              <button class="btn btn-sm" onclick="recoverPhotos()"><i class="ti ti-photo-search" aria-hidden="true"></i> Recover uploaded photos</button>
+              <span style="font-size:11px;color:var(--ink3);">Re-attaches photos from the PropCMA Photos folder on OneDrive and writes them back to the sheet.</span>
+            </div>
             <div class="status-pill ok" style="display:inline-flex;"><i class="ti ti-check" aria-hidden="true"></i> Signed in — Excel sync and write-back enabled</div>
           </div>
         </div>
@@ -1130,6 +1134,49 @@ async function handlePhotoUpload(input){
     console.error('Photo upload:',e);
     status.textContent='⚠ Upload failed: '+e.message;
   }
+}
+// Scan the PropCMA Photos folder and re-attach uploads to their properties.
+// Filenames encode the property id ({propId}_{timestamp}.jpg), so photos can be
+// recovered even if the app's photo references were lost (e.g. wiped by a sync
+// that ran before the reference reached the sheet's Photos column).
+async function recoverPhotos(){
+  if(!msToken){showToast('Sign in to Microsoft first');return;}
+  try{
+    showToast('Scanning PropCMA Photos folder…');
+    const folderId=await ensurePhotoFolder();
+    let items=[],url=`/drives/${cfg._driveId}/items/${folderId}/children?$top=200`;
+    while(url){
+      const res=await graphRetry(()=>graphGet(url));
+      items=items.concat(res.value||[]);
+      url=res['@odata.nextLink']?res['@odata.nextLink'].replace('https://graph.microsoft.com/v1.0',''):null;
+    }
+    // Group files by property id from the filename
+    const byProp={};
+    items.forEach(f=>{
+      const m=(f.name||'').match(/^(xl_\d+)_(\d+)\.jpe?g$/i);
+      if(m)(byProp[m[1]]=byProp[m[1]]||[]).push({id:f.id,ts:+m[2]});
+    });
+    let attached=0,written=0;
+    for(const[pid,files]of Object.entries(byProp)){
+      const p=allProperties.find(x=>x.id===pid);
+      if(!p)continue;
+      const existing=(p.photos||'').split(',').map(s=>s.trim()).filter(Boolean);
+      const refs=files.sort((a,b)=>a.ts-b.ts).map(f=>`graph://${cfg._driveId}/${f.id}`);
+      const merged=[...existing,...refs.filter(r=>!existing.includes(r))];
+      if(merged.length===existing.length)continue;
+      // Snapshot BEFORE mutating so the Excel write-back only touches the Photos cell
+      editingSnapshot=snapshotProp(p);
+      p.photos=merged.join(', ');
+      const{error}=await sb.from('properties').upsert(appToDb(p),{onConflict:'id'});
+      if(error){console.warn('Recover: supabase error for',pid,error.message);continue;}
+      attached++;
+      if(await writePropertyToExcel(p).catch(()=>false))written++;
+    }
+    editingSnapshot=null;
+    applyFilters();
+    if(attached)showToast(`Re-attached photos to ${attached} propert${attached===1?'y':'ies'} (${written} written to Excel)`);
+    else showToast('No orphaned photos found');
+  }catch(e){showToast('Recovery failed: '+e.message);console.error(e);}
 }
 // Resolve a graph:// photo reference to a displayable thumbnail URL
 async function resolveGraphPhotoUrl(ref){
