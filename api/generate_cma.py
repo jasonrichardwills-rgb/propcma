@@ -393,7 +393,7 @@ TBL_COLS = [120, 112, 48, 52, 58, 95, 70]   # sums to 555 = A4 width - 2*20
 
 def draw_table_header(c, y):
     """Bold navy column headers, per the layout document."""
-    labels = ['', 'Address', '$/m²', 'SQM', 'Sale Price', 'Date Sold', 'Broker Name']
+    labels = ['', 'Address', '$/m²', 'Land SQM', 'Sale Price', 'Date Sold', 'Broker Name']
     c.setFont('Helvetica-Bold', 10)
     c.setFillColor(NAVY)
     x = TBL_X
@@ -600,7 +600,7 @@ def build_report(data, output_path):
         if subject_sqm:
             c.setFont('Helvetica', 8)
             c.setFillColor(HexColor('#93C5E8'))
-            c.drawString(30, box_y + 10, f'{fmt_num(subject_sqm)} m²  floor area')
+            c.drawString(30, box_y + 10, f'{fmt_num(subject_sqm)} m²  land area')
 
     # Stats on cover
     n = stats.get('count', len(props))
@@ -628,7 +628,7 @@ def build_report(data, output_path):
         if subject_sqm:
             c.setFont('Helvetica', 10)
             c.setFillColor(DGREY)
-            c.drawCentredString(right_cx, H/2 - 18, f'× {fmt_num(subject_sqm)} m²  subject area')
+            c.drawCentredString(right_cx, H/2 - 18, f'× {fmt_num(subject_sqm)} m²  subject land area')
 
     # Footer on cover
     footer(c, 1, total_pages)
@@ -656,7 +656,7 @@ def build_report(data, output_path):
         ('Median $/m²', fmt_psm(stats.get('median_psm')), ''),
         ('$/m² Range', f'{fmt_psm(stats.get("psm_min"))} – {fmt_psm(stats.get("psm_max"))}', ''),
         ('Median Price', fmt_price(stats.get('median_price')), ''),
-        ('Avg Floor Area', f'{fmt_num(stats.get("avg_sqm"))} m²', ''),
+        ('Avg Land Area', f'{fmt_num(stats.get("avg_sqm"))} m²', ''),
         ('Price Range', f'{fmt_price(stats.get("price_min"))} – {fmt_price(stats.get("price_max"))}', ''),
     ]
     card_margin = 20
@@ -689,7 +689,7 @@ def build_report(data, output_path):
         c.setFont('Helvetica', 9)
         c.setFillColor(HexColor('#B8D9F0'))
         c.drawString(30 + c.stringWidth(rng, 'Helvetica-Bold', 18) + 16, iv_y + 20,
-                     f'at {fmt_psm(psm_low)} – {fmt_psm(psm_high)} /m²  ×  {fmt_num(subject_sqm)} m²  subject area')
+                     f'at {fmt_psm(psm_low)} – {fmt_psm(psm_high)} /m²  ×  {fmt_num(subject_sqm)} m²  subject land area')
     if subject:
         c.setFont('Helvetica', 8)
         c.setFillColor(HexColor('#93C5E8'))
