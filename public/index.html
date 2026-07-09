@@ -297,7 +297,7 @@ input[type=checkbox]{cursor:pointer;accent-color:var(--cb);}
             <th data-col="category">Type <i class="ti ti-arrows-sort sort-icon" aria-hidden="true"></i></th>
             <th data-col="leaseOrSale">L/S <i class="ti ti-arrows-sort sort-icon" aria-hidden="true"></i></th>
             <th data-col="auction">Auction <i class="ti ti-arrows-sort sort-icon" aria-hidden="true"></i></th>
-            <th data-col="sqm">SQM <i class="ti ti-arrows-sort sort-icon" aria-hidden="true"></i></th>
+            <th data-col="sqm">Land Area SQM <i class="ti ti-arrows-sort sort-icon" aria-hidden="true"></i></th>
             <th data-col="pricePerSqm">$/m² <i class="ti ti-arrows-sort sort-icon" aria-hidden="true"></i></th>
             <th data-col="salePrice">Price <i class="ti ti-arrows-sort sort-icon" aria-hidden="true"></i></th>
             <th data-col="broker">Broker <i class="ti ti-arrows-sort sort-icon" aria-hidden="true"></i></th>
@@ -406,7 +406,7 @@ input[type=checkbox]{cursor:pointer;accent-color:var(--cb);}
                 </tbody>
               </table>
               <div style="display:flex;gap:10px;align-items:center;margin-top:10px;">
-                <label style="font-size:12px;color:var(--ink2);font-weight:500;">Subject area (m²)</label>
+                <label style="font-size:12px;color:var(--ink2);font-weight:500;">Subject land area (m²)</label>
                 <input type="number" id="subject-sqm" value="1000" style="width:120px;" oninput="recalcVal()">
               </div>
               <div class="val-result">
@@ -429,7 +429,7 @@ input[type=checkbox]{cursor:pointer;accent-color:var(--cb);}
                 <thead><tr style="border-bottom:2px solid var(--cb);">
                   <th style="padding:6px 8px;text-align:left;font-size:10px;text-transform:uppercase;letter-spacing:.06em;color:#000;font-weight:700;">Address</th>
                   <th style="padding:6px 8px;text-align:left;font-size:10px;text-transform:uppercase;letter-spacing:.06em;color:#000;font-weight:700;">Date</th>
-                  <th style="padding:6px 8px;text-align:right;font-size:10px;text-transform:uppercase;letter-spacing:.06em;color:#000;font-weight:700;">SQM</th>
+                  <th style="padding:6px 8px;text-align:right;font-size:10px;text-transform:uppercase;letter-spacing:.06em;color:#000;font-weight:700;">Land SQM</th>
                   <th style="padding:6px 8px;text-align:right;font-size:10px;text-transform:uppercase;letter-spacing:.06em;color:#000;font-weight:700;">Price</th>
                   <th style="padding:6px 8px;text-align:right;font-size:10px;text-transform:uppercase;letter-spacing:.06em;color:#000;font-weight:700;">$/m²</th>
                   <th style="padding:6px 8px;text-align:left;font-size:10px;text-transform:uppercase;letter-spacing:.06em;color:#000;font-weight:700;">Broker</th>
@@ -596,11 +596,11 @@ input[type=checkbox]{cursor:pointer;accent-color:var(--cb);}
     <div class="edit-section-title">Editable fields</div>
     <div class="edit-row-pair">
       <div class="edit-field">
-        <label>SQM (floor area)</label>
+        <label>Land Area SQM</label>
         <input type="number" id="so-sqm" placeholder="e.g. 1200" min="0" step="1">
       </div>
       <div class="edit-field">
-        <label>Land Area (SQM)</label>
+        <label>Building Area SQM</label>
         <input type="number" id="so-land-area" placeholder="e.g. 2500" min="0" step="1">
       </div>
     </div>
@@ -675,7 +675,7 @@ const FIELDS=[
   {key:'leaseOrSale', label:'Lease / Sale'},
   {key:'auction',     label:'Auction'},
   {key:'category',    label:'Category'},
-  {key:'sqm',         label:'SQM'},
+  {key:'sqm',         label:'Land Area SQM'},
   {key:'pricePerSqm', label:'Price per SQM'},
   {key:'salePrice',   label:'Sale Price'},
   {key:'purchaser',   label:'Purchaser / Tenant'},
@@ -1218,6 +1218,15 @@ async function syncFromExcel(){
       if(mapped){const i=headers.findIndex(h=>h===mapped);if(i>=0)colIdx[f.key]=i;}
     });
 
+    // Edit-only columns (written by the app's write-back) — read them back on
+    // sync so edits, notes, and uploaded photos survive the wipe-and-reload
+    const EDIT_COL_NAMES={landArea:'Land Area (SQM)',annualRent:'Annual Rent ($)',initialYield:'Initial Yield (%)',notes:'Notes',photos:'Photos'};
+    const editColIdx={};
+    Object.entries(EDIT_COL_NAMES).forEach(([k,name])=>{
+      const i=headers.findIndex(h=>h.toLowerCase().trim()===name.toLowerCase());
+      if(i>=0)editColIdx[k]=i;
+    });
+
     const newProps=values.slice(1).map((row,i)=>{
       const p={id:'xl_'+(i+2),_rowNum:i+2};
       FIELDS.forEach(f=>{
@@ -1233,6 +1242,13 @@ async function syncFromExcel(){
       });
       p.broker=combineBrokers(p);
       BROKER_FIELDS.forEach(b=>delete p[b.key]);
+      Object.entries(editColIdx).forEach(([k,ci])=>{
+        if(ci>=row.length)return;
+        let v=String(row[ci]??'').trim();
+        if(!v||v==='null')return;
+        if(k==='landArea'||k==='annualRent'||k==='initialYield'){const n=parseFloat(v.replace(/[^0-9.\-]/g,''));if(!isNaN(n))p[k]=n;}
+        else p[k]=v;
+      });
       if(p.sqm&&p.salePrice&&!p.pricePerSqm)p.pricePerSqm=p.salePrice/p.sqm;
       if(p.sqm&&p.pricePerSqm&&!p.salePrice)p.salePrice=p.sqm*p.pricePerSqm;
       p.saleDateTs=parseDate(p.saleDate);
@@ -1906,7 +1922,7 @@ async function exportPDF(){
 }
 function exportCSV(){
   const sel=allProperties.filter(p=>selected.has(p.id));
-  const cols=[{k:'address',l:'Address'},{k:'mapsUrl',l:'Maps URL'},{k:'saleDate',l:'Sale Date'},{k:'leaseOrSale',l:'Lease/Sale'},{k:'auction',l:'Auction'},{k:'category',l:'Category'},{k:'sqm',l:'SQM'},{k:'landArea',l:'Land Area (SQM)'},{k:'pricePerSqm',l:'Price per SQM'},{k:'salePrice',l:'Sale Price'},{k:'annualRent',l:'Annual Rent ($)'},{k:'initialYield',l:'Initial Yield (%)'},{k:'broker',l:'Broker'},{k:'purchaser',l:'Purchaser/Tenant'},{k:'vendor',l:'Vendor/Landlord'},{k:'notes',l:'Notes'},{k:'photos',l:'Photos'}];
+  const cols=[{k:'address',l:'Address'},{k:'mapsUrl',l:'Maps URL'},{k:'saleDate',l:'Sale Date'},{k:'leaseOrSale',l:'Lease/Sale'},{k:'auction',l:'Auction'},{k:'category',l:'Category'},{k:'sqm',l:'Land Area SQM'},{k:'landArea',l:'Building Area SQM'},{k:'pricePerSqm',l:'Price per SQM'},{k:'salePrice',l:'Sale Price'},{k:'annualRent',l:'Annual Rent ($)'},{k:'initialYield',l:'Initial Yield (%)'},{k:'broker',l:'Broker'},{k:'purchaser',l:'Purchaser/Tenant'},{k:'vendor',l:'Vendor/Landlord'},{k:'notes',l:'Notes'},{k:'photos',l:'Photos'}];
   const cell=(p,c)=>{
     if(c.k==='mapsUrl')return p.address?mapsUrl(p.address):'';
     let v=p[c.k];
