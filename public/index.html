@@ -1305,6 +1305,18 @@ function excelWriteCols(prop){
 }
 
 let lastExcelWriteError='';
+// The Graph Excel workbook backend can return transient errors — including a
+// spurious 404 "resource doesn't exist" — while its session cold-starts. The
+// failed call itself warms the session, which is why a retry (or the user's
+// second attempt) succeeds. So: retry ALL workbook calls with backoff.
+async function graphRetry(fn,attempts=3){
+  let lastErr;
+  for(let i=0;i<attempts;i++){
+    try{return await fn();}
+    catch(e){lastErr=e;if(i<attempts-1)await new Promise(r=>setTimeout(r,800*(i+1)));}
+  }
+  throw lastErr;
+}
 async function writePropertyToExcel(prop){
   lastExcelWriteError='';
   if(!msToken){
@@ -1316,20 +1328,20 @@ async function writePropertyToExcel(prop){
   if(!cfg._driveId||!cfg._itemId){
     try{
       const encoded='u!'+btoa(EXCEL_URL).replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,'');
-      const driveItem=await graphGet(`/shares/${encoded}/driveItem`);
+      const driveItem=await graphRetry(()=>graphGet(`/shares/${encoded}/driveItem`));
       cfg._driveId=driveItem.parentReference?.driveId;
       cfg._itemId=driveItem.id;
       if(!cfg._sheetName){
-        const sheetsData=await graphGet(`/drives/${cfg._driveId}/items/${cfg._itemId}/workbook/worksheets`);
+        const sheetsData=await graphRetry(()=>graphGet(`/drives/${cfg._driveId}/items/${cfg._itemId}/workbook/worksheets`));
         cfg._sheetName=(sheetsData.value||[])[0]?.name||'Sheet1';
       }
       if(!cfg._headers){
         // Fetch ONLY the header row — a usedRange call here pulls the entire
         // sheet (thousands of rows) and can time out, which made the first
         // save of every session fail while the second succeeded
-        const hdrData=await graphGet(
+        const hdrData=await graphRetry(()=>graphGet(
           `/drives/${cfg._driveId}/items/${cfg._itemId}/workbook/worksheets/${encodeURIComponent(cfg._sheetName)}/range(address='A1:ZZ1')`
-        );
+        ));
         let hrow=(hdrData.values||[[]])[0].map(v=>String(v??''));
         while(hrow.length&&hrow[hrow.length-1]==='')hrow.pop();
         cfg._headers=hrow;
@@ -1354,9 +1366,9 @@ async function writePropertyToExcel(prop){
       // by another user) — refresh the live header row before appending anything,
       // otherwise we'd rewrite the header row from outdated data and misalign cells
       try{
-        const hdrData=await graphGet(
+        const hdrData=await graphRetry(()=>graphGet(
           `/drives/${cfg._driveId}/items/${cfg._itemId}/workbook/worksheets/${encodeURIComponent(sn)}/range(address='A1:ZZ1')`
-        );
+        ));
         let hrow=(hdrData.values||[[]])[0].map(v=>String(v??''));
         while(hrow.length&&hrow[hrow.length-1]==='')hrow.pop();
         if(hrow.length){headers=hrow;cfg._headers=headers;}
@@ -1368,10 +1380,10 @@ async function writePropertyToExcel(prop){
       // IMPORTANT: must patch an explicit range address — never usedRange.
       // usedRange spans all rows, so writing a 1-row array causes a 400 dimension mismatch.
       const lastCol=colNumToLetter(newHeaders.length);
-      await graphPatch(
+      await graphRetry(()=>graphPatch(
         `/drives/${cfg._driveId}/items/${cfg._itemId}/workbook/worksheets/${encodeURIComponent(sn)}/range(address='A1:${lastCol}1')`,
         {values:[newHeaders]}
-      );
+      ));
       cfg._headers=newHeaders;
       headers=newHeaders;
     }
@@ -1391,15 +1403,7 @@ async function writePropertyToExcel(prop){
     // Write cells SEQUENTIALLY with retry — parallel PATCHes trip the Excel
     // workbook's lock and Graph throttling (409/423/429), which caused
     // intermittent "Excel write failed" errors.
-    const patchWithRetry=async(path,body)=>{
-      for(let attempt=0;attempt<3;attempt++){
-        try{return await graphPatch(path,body);}
-        catch(e){
-          if(attempt===2)throw e;
-          await new Promise(r=>setTimeout(r,600*(attempt+1)));
-        }
-      }
-    };
+    const patchWithRetry=(path,body)=>graphRetry(()=>graphPatch(path,body));
     for(const[colName,val]of writeCols){
       let ci=headers.indexOf(colName);
       if(ci<0){
