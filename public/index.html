@@ -1370,6 +1370,7 @@ async function writePropertyToExcel(prop){
     }
   }
 
+  let step='prepare';
   try{
     const sn=cfg._sheetName||'Sheet1';
     let headers=cfg._headers||[];
@@ -1378,6 +1379,7 @@ async function writePropertyToExcel(prop){
     const writeCols=excelWriteCols(prop);
     let needed=writeCols.map(([c])=>c).filter(c=>!headers.includes(c));
     if(needed.length){
+      step='refresh headers';
       // The header cache may be stale (e.g. a column added in an earlier session or
       // by another user) — refresh the live header row before appending anything,
       // otherwise we'd rewrite the header row from outdated data and misalign cells
@@ -1392,6 +1394,7 @@ async function writePropertyToExcel(prop){
       needed=writeCols.map(([c])=>c).filter(c=>!headers.includes(c));
     }
     if(needed.length){
+      step='append header columns ('+needed.join(', ')+')';
       const newHeaders=[...headers,...needed];
       // IMPORTANT: must patch an explicit range address — never usedRange.
       // usedRange spans all rows, so writing a 1-row array causes a 400 dimension mismatch.
@@ -1427,16 +1430,19 @@ async function writePropertyToExcel(prop){
         headers.push(colName);
         cfg._headers=headers;
         ci=headers.length-1;
-        // Write the header cell first
-        await patchWithRetry(`${base}/cell(row=0,column=${ci})`,{values:[[colName]]});
+        step='write header "'+colName+'" at '+colLetter(ci)+'1';
+        await patchWithRetry(`${base}/range(address='${colLetter(ci)}1')`,{values:[[colName]]});
       }
-      // Use 0-based row/column cell API — more reliable than address strings
-      await patchWithRetry(`${base}/cell(row=${rowNum-1},column=${ci})`,{values:[[val]]});
+      // PATCH range(address=) is the documented update endpoint — PATCHing the
+      // cell(row,column) function path 404s on some Graph backends
+      const addr=colLetter(ci)+rowNum;
+      step='write "'+colName+'" to cell '+addr;
+      await patchWithRetry(`${base}/range(address='${addr}')`,{values:[[val]]});
     }
     return true;
   }catch(e){
-    console.error('Excel write error:',e.message,e);
-    lastExcelWriteError=e.message||'unknown error';
+    console.error('Excel write error at step ['+step+']:',e.message,e);
+    lastExcelWriteError='['+step+'] '+(e.message||'unknown error');
     return false;
   }
 }
