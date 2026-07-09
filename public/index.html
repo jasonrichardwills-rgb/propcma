@@ -1324,10 +1324,15 @@ async function writePropertyToExcel(prop){
         cfg._sheetName=(sheetsData.value||[])[0]?.name||'Sheet1';
       }
       if(!cfg._headers){
-        const rangeData=await graphGet(
-          `/drives/${cfg._driveId}/items/${cfg._itemId}/workbook/worksheets/${encodeURIComponent(cfg._sheetName)}/usedRange`
+        // Fetch ONLY the header row — a usedRange call here pulls the entire
+        // sheet (thousands of rows) and can time out, which made the first
+        // save of every session fail while the second succeeded
+        const hdrData=await graphGet(
+          `/drives/${cfg._driveId}/items/${cfg._itemId}/workbook/worksheets/${encodeURIComponent(cfg._sheetName)}/range(address='A1:ZZ1')`
         );
-        cfg._headers=(rangeData.values||[[]])[0].map(String);
+        let hrow=(hdrData.values||[[]])[0].map(v=>String(v??''));
+        while(hrow.length&&hrow[hrow.length-1]==='')hrow.pop();
+        cfg._headers=hrow;
       }
     }catch(e){
       console.error('Excel resolve error:',e);
