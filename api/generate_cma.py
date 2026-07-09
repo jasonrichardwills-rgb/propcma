@@ -132,14 +132,19 @@ def footer(c, page_num, total_pages):
     lh = 16
     lx, ly = 12, fy + (fh - lh) / 2
     lw = draw_logo_img(c, lx, ly, lh)
-    # colliers.co.nz
-    c.setFont('Helvetica', 7)
+    # Licence line
+    lic = 'South Island Commercial Limited - Licensed under the REAA 2008'
     c.setFillColor(HexColor('#B8D9F0'))
-    c.drawString(lx + lw + 6, fy + 8, 'colliers.co.nz')
-    # Confidential
-    c.drawCentredString(W/2, fy + 8, 'Confidential — for client use only')
+    c.setFont('Helvetica', 6.5)
+    c.drawString(lx + lw + 6, fy + 8, lic)
+    lic_end = lx + lw + 6 + c.stringWidth(lic, 'Helvetica', 6.5)
     # Page number
-    c.drawRightString(W - 14, fy + 8, f'Page {page_num} of {total_pages}')
+    c.setFont('Helvetica', 7)
+    pg = f'Page {page_num} of {total_pages}'
+    c.drawRightString(W - 14, fy + 8, pg)
+    pg_start = W - 14 - c.stringWidth(pg, 'Helvetica', 7)
+    # Confidential — centred in the remaining space
+    c.drawCentredString((lic_end + pg_start) / 2, fy + 8, 'Confidential — for client use only')
 
 def header_bar(c, title=''):
     """Top navy band for inner pages."""
