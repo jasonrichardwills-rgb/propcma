@@ -28,16 +28,18 @@ export default async function handler(req, res) {
     if (!isOwner && !(isStaff && deal.status !== "draft"))
       throw new HttpError(403, "Not permitted");
 
-    const [{ data: splits }, { data: events }] = await Promise.all([
+    const [{ data: splits }, { data: events }, { data: attachments }] = await Promise.all([
       supabase.from("deal_sheet_splits").select("*").eq("deal_id", id),
       supabase
         .from("deal_sheet_events")
         .select("actor, from_status, to_status, note, created_at")
         .eq("deal_id", id)
         .order("created_at", { ascending: true }),
+      supabase.from("deal_sheet_attachments")
+        .select("slot, file_name, content_type, size_bytes").eq("deal_id", id),
     ]);
 
-    return res.status(200).json({ ...deal, splits: splits || [], events: events || [] });
+    return res.status(200).json({ ...deal, splits: splits || [], events: events || [], attachments: attachments || [] });
   } catch (e) {
     sendError(res, e);
   }
