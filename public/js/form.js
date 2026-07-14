@@ -10,6 +10,19 @@
   const fmt = (n) => n.toLocaleString("en-NZ", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
   const DIVISIONS = ["Industrial","Office","Retail","Investment Sales","Land","Rural & Agribusiness","Other"];
+  const BROKERS = [
+    { code:"AS", name:"Angus" },{ code:"AB", name:"Annabelle" },{ code:"BC", name:"Ben" },
+    { code:"BB", name:"Brynn" },{ code:"CK", name:"Christian" },{ code:"CD", name:"Courtney" },
+    { code:"ES", name:"Ed" },{ code:"EC", name:"Elliot" },{ code:"GS", name:"Gary" },
+    { code:"GB", name:"Greg" },{ code:"HD", name:"Hamish" },{ code:"HP", name:"Harry" },
+    { code:"HW", name:"Helen" },{ code:"JM", name:"Jackson" },{ code:"LM", name:"Lachlan" },
+    { code:"LT", name:"Lane" },{ code:"LW", name:"Luke" },{ code:"MO", name:"Marius" },
+    { code:"MM", name:"Mark" },{ code:"ML", name:"Michael" },{ code:"ND", name:"Nick" },
+    { code:"NG", name:"Noel" },{ code:"OS", name:"Oliver" },{ code:"PM", name:"Paul" },
+    { code:"PC", name:"Phil" },{ code:"RM", name:"Rory" },{ code:"SR", name:"Sally" },
+    { code:"SS", name:"Sam" },{ code:"TL", name:"Tom" },{ code:"WF", name:"Will" },
+  ];
+  const BROKER_NAMES = BROKERS.map((b) => b.name);
   const TITLES = ["Freehold","Strata","Leasehold"];
   const PAY = ["Direct credit","Cheque","International transfer"];
   const BUYER = ["Advert","Sign","Website","Relationship","Target mailing","Referral","Canvassing","Other"];
@@ -31,13 +44,14 @@
       sale: { dateOfAgreement:"", unconditionalDate:"", salePrice:"", rentalBasis:"Net", rentalIncome:"", yieldManual:"", titleType:"Freehold", landArea:"", wale:"", tenancies:"", occupiedArea:"", tenancySchedule:false },
       depositToTrust: false,
       deposit: { amount:"", dateReceived:"", method:"Direct credit", receiptNo:"", earlyRelease:false, vendorAuthSent:false, vendorAuthReceived:false, purchaserAuthSent:false, purchaserAuthReceived:false },
-      comm: { tiers:[{pct:"",base:""},{pct:"",base:""},{pct:"",base:""}], otherDesc:"", otherFee:"", adminFee:true, marketingFeeInstead:false, marketingJobNo:"", recoverMarketing:"", recoverJobNo:"", recoverOtherDesc:"", recoverOther:"" },
+      comm: { tiers:[{pct:"",base:""},{pct:"",base:""},{pct:"",base:""}], otherDesc:"", otherFee:"", adminFee:true, marketingFee:false, marketingJobNo:"", recoverMarketing:"", recoverJobNo:"", recoverOtherDesc:"", recoverOther:"" },
       splits: [ {person:"",pct:""},{person:"",pct:""},{person:"",pct:""},{person:"",pct:""},{person:"",pct:""} ],
       thirdParty: [ {name:"",pct:""},{name:"",pct:""},{name:"",pct:""} ],
       press: { text:"", confidential:false },
       buyerSource:"", buyerSourceOther:"",
       listingSource:"", listingReferralWho:"", listingReferralInternal:"Yes", listingOther:"",
       checklist: { agencyAgreement:false, unconditionalConfirmation:false, salePriceConfirmation:false, marketingReport:false, spAgreement:false },
+      attachments: {},  // { slotKey: { name, path, size } } populated after upload
       brokerName:"",
     },
   };
@@ -59,14 +73,13 @@
     // Manual/pre-filled yield takes precedence; otherwise show the calc.
     const yieldPct = f.sale.yieldManual !== "" ? num(f.sale.yieldManual) : yieldCalc;
     const tierFees = f.comm.tiers.map((t,i) => { const base = i===0 && !t.base ? salePrice : num(t.base); return (num(t.pct)/100)*base; });
-    const fixedFee = (f.comm.marketingFeeInstead || f.comm.adminFee) ? 500 : 0;
+    const fixedFee = (f.comm.adminFee ? 500 : 0) + (f.comm.marketingFee ? 500 : 0);
     const totalInvoice = tierFees.reduce((a,b)=>a+b,0) + num(f.comm.otherFee) + fixedFee + num(f.comm.recoverMarketing) + num(f.comm.recoverOther);
     const allSplits = [...f.splits, ...f.thirdParty];
     const splitPctTotal = allSplits.reduce((a,s)=>a+num(s.pct),0);
     const splitsOk = splitPctTotal === 0 || Math.abs(splitPctTotal-100) < 0.01;
     const pressWords = f.press.text.trim() ? f.press.text.trim().split(/\s+/).length : 0;
-    return { salePrice, yieldCalc, yieldPct, tierFees, fixedFee, totalInvoice, splitPctTotal, splitsOk, pressWords };
-  }
+    return { salePrice, yieldCalc, yieldPct, tierFees, fixedFee, totalInvoice, splitPctTotal, splitsOk, pressWords };  }
 
   function validate(d) {
     const f = state.f, m = [];
@@ -124,7 +137,7 @@
     ${txt(base+".name","Name",{span:2,req:base==="vendor"})}${txt(base+".phone","Phone")}
     ${txt(base+".contactName","Contact name",{span:2})}${txt(base+".email","Email",{type:"email"})}
     ${txt(base+".postalAddress","Postal address",{span:2})}${txt(base+".postcode","Postcode")}
-    ${txt(base+".city","City")}${txt(base+".country","Country")}${txt(base+".fax","Fax")}
+    ${txt(base+".city","City")}${txt(base+".country","Country")}
     ${solicitor ? txt(base+".solicitorName","Solicitor")+txt(base+".solicitorFirm","Firm")+txt(base+".solicitorPhone","Solicitor phone") : ""}
   </div>`;
   const section = (n, title, note, inner) => `<section class="card"><header class="cardHead">
@@ -135,6 +148,20 @@
     return d.yieldCalc ? `auto: ${d.yieldCalc.toFixed(2)}` : "auto-calculated";
   }
 
+  // File attachment slot: shows attach button, or the attached file with a remove option.
+  function uploadSlot(slotKey, label) {
+    const a = state.f.attachments[slotKey];
+    if (a) {
+      return `<div class="upSlot done" data-slot="${slotKey}">
+        <span class="upFile">📎 ${esc(a.name)}</span>
+        <button type="button" class="upRemove" data-slot="${slotKey}">Remove</button></div>`;
+    }
+    return `<div class="upSlot" data-slot="${slotKey}">
+      <label class="upBtn">Attach file<input type="file" class="upInput" data-slot="${slotKey}" hidden /></label>
+      <span class="upHint">${label}</span>
+      <span class="upProgress hidden" data-slot="${slotKey}">Uploading…</span></div>`;
+  }
+
   // ---------- render ----------
   function render() {
     const d = derive();
@@ -143,17 +170,19 @@
 
     const commRows = ["Commission","Second tier","Third tier"].map((label,i) => `<tr>
       <td>${label}</td>
-      <td><input class="cell" data-path="comm.tiers.${i}.pct" value="${esc(f.comm.tiers[i].pct)}" placeholder="%" /></td>
-      <td><input class="cell" data-path="comm.tiers.${i}.base" value="${esc(i===0 && !f.comm.tiers[i].base ? (d.salePrice?fmt(d.salePrice):"") : f.comm.tiers[i].base)}" placeholder="${i===0?"Sale price":"Amount"}" /></td>
+      <td><input class="cell" data-recalc data-path="comm.tiers.${i}.pct" value="${esc(f.comm.tiers[i].pct)}" placeholder="%" /></td>
+      <td><input class="cell" data-recalc data-path="comm.tiers.${i}.base" value="${esc(i===0 && !f.comm.tiers[i].base ? (d.salePrice?fmt(d.salePrice):"") : f.comm.tiers[i].base)}" placeholder="${i===0?"Sale price":"Amount"}" /></td>
       <td class="r mono">${d.tierFees[i]?fmt(d.tierFees[i]):"—"}</td></tr>`).join("");
 
     const splitRows = f.splits.map((s,i) => `<tr>
-      <td><input class="cell" data-path="splits.${i}.person" value="${esc(s.person)}" placeholder="Salesperson ${i+1}" /></td>
-      <td><input class="cell" data-path="splits.${i}.pct" value="${esc(s.pct)}" placeholder="%" /></td>
+      <td><select class="cell" data-path="splits.${i}.person"><option value="">Salesperson ${i+1}</option>
+        ${BROKER_NAMES.map((n) => `<option value="${esc(n)}" ${s.person===n?"selected":""}>${esc(n)}</option>`).join("")}
+        </select></td>
+      <td><input class="cell" data-recalc data-path="splits.${i}.pct" value="${esc(s.pct)}" placeholder="%" /></td>
       <td class="r mono">${num(s.pct)?fmt((num(s.pct)/100)*d.totalInvoice):"—"}</td></tr>`).join("");
     const tpRows = f.thirdParty.map((s,i) => `<tr>
       <td><input class="cell" data-path="thirdParty.${i}.name" value="${esc(s.name)}" placeholder="Office / party" /></td>
-      <td><input class="cell" data-path="thirdParty.${i}.pct" value="${esc(s.pct)}" placeholder="%" /></td>
+      <td><input class="cell" data-recalc data-path="thirdParty.${i}.pct" value="${esc(s.pct)}" placeholder="%" /></td>
       <td class="r mono">${num(s.pct)?fmt((num(s.pct)/100)*d.totalInvoice):"—"}</td></tr>`).join("");
 
     $("app").innerHTML = `
@@ -171,7 +200,10 @@
       <div class="layout">
         <main>
           ${section("1","Deal ownership","",`<div class="grid">
-            ${txt("ownership.salesperson","Salesperson",{ph:"e.g. OS",req:true})}
+            <label class="fld"><span class="lbl">Salesperson<em class="req">*</em></span>
+              <select data-path="ownership.salesperson"><option value="">Select…</option>
+              ${BROKERS.map((b) => `<option value="${b.code}" ${f.ownership.salesperson===b.code?"selected":""}>${esc(b.name)} (${b.code})</option>`).join("")}
+              </select></label>
             ${sel("ownership.division","Division",DIVISIONS)}${txt("ownership.office","Office")}</div>`)}
 
           ${section("2","Property details","Search PropCMA to pre-fill the address, land area and yield.",`
@@ -207,7 +239,8 @@
             ${sel("sale.titleType","Title",TITLES)}${txt("sale.landArea","Land area (sqm)")}
             ${txt("sale.wale","WALE (Years)")}
             ${txt("sale.tenancies","No. of tenancies (incl. sub-tenancies)")}${txt("sale.occupiedArea","Occupied by area (sqm)")}</div>
-            <div style="margin-top:10px">${chk("sale.tenancySchedule","Tenancy schedule attached (if available)")}</div>`)}
+            <div style="margin-top:10px">${chk("sale.tenancySchedule","Tenancy schedule attached (if available)")}
+              ${uploadSlot("tenancySchedule","optional — PDF or Excel")}</div>`)}
 
           ${section("7","Deposit — trust account","Complete if a deposit will be paid into the Colliers trust account.",
             chk("depositToTrust","Deposit paid into the trust account") + (f.depositToTrust?`
@@ -225,10 +258,10 @@
               <tr><td>Other</td><td colspan="2"><input class="cell" data-path="comm.otherDesc" value="${esc(f.comm.otherDesc)}" placeholder="Please specify" /></td>
                 <td class="r"><input class="cell r" data-path="comm.otherFee" value="${esc(f.comm.otherFee)}" placeholder="0.00" /></td></tr>
               <tr><td colspan="3"><div class="feeChoice">
-                <label class="chk"><input type="radio" name="fee" id="feeAdmin" ${f.comm.adminFee && !f.comm.marketingFeeInstead?"checked":""} /><span>Administration fee ($500)</span></label>
-                <label class="chk"><input type="radio" name="fee" id="feeMkt" ${f.comm.marketingFeeInstead?"checked":""} /><span>Marketing fee ($500) — Job no.</span></label>
-                ${f.comm.marketingFeeInstead?`<input class="cell jobNo" data-path="comm.marketingJobNo" value="${esc(f.comm.marketingJobNo)}" placeholder="Job no." />`:""}
-              </div></td><td class="r mono">500.00</td></tr>
+                <label class="chk"><input type="checkbox" id="feeAdmin" ${f.comm.adminFee?"checked":""} /><span>Administration fee ($500)</span></label>
+                <label class="chk"><input type="checkbox" id="feeMkt" ${f.comm.marketingFee?"checked":""} /><span>Marketing fee ($500) — Job no.</span></label>
+                ${f.comm.marketingFee?`<input class="cell jobNo" data-path="comm.marketingJobNo" value="${esc(f.comm.marketingJobNo)}" placeholder="Job no." />`:""}
+              </div></td><td class="r mono">${fmt(d.fixedFee)}</td></tr>
               <tr><td>Recover marketing costs</td><td><input class="cell" data-path="comm.recoverJobNo" value="${esc(f.comm.recoverJobNo)}" placeholder="Job no." /></td><td></td>
                 <td class="r"><input class="cell r" data-path="comm.recoverMarketing" value="${esc(f.comm.recoverMarketing)}" placeholder="0.00" /></td></tr>
               <tr><td>Recover other costs</td><td colspan="2"><input class="cell" data-path="comm.recoverOtherDesc" value="${esc(f.comm.recoverOtherDesc)}" placeholder="Please specify" /></td>
@@ -252,12 +285,12 @@
             ${f.listingSource==="Referral"?txt("listingReferralWho","Referral — who")+sel("listingReferralInternal","Internal referral",["Yes","No"]):""}
             ${f.listingSource==="Other"?txt("listingOther","Other — specify",{span:2}):""}</div>`)}
 
-          ${section("12","Mandatory checklist","The invoice will not be raised unless all relevant boxes are ticked.",`<div class="checkStack">
-            ${chk("checklist.agencyAgreement","Signed agency agreement attached")}
-            ${chk("checklist.unconditionalConfirmation","Confirmation of unconditional attached (from vendor or vendor's solicitor)")}
-            ${chk("checklist.salePriceConfirmation","Confirmation of sale price attached (e.g. first page of the S&P agreement)")}
-            ${chk("checklist.marketingReport","Marketing campaign report attached")}
-            ${f.depositToTrust?chk("checklist.spAgreement","Trust deal — sale and purchase agreement attached"):""}</div>`)}
+          ${section("12","Mandatory checklist","Tick each item. You may optionally attach the document — accounts can download it.",`<div class="checkStack">
+            <div class="checkRow">${chk("checklist.agencyAgreement","Signed agency agreement attached")}${uploadSlot("agencyAgreement","")}</div>
+            <div class="checkRow">${chk("checklist.unconditionalConfirmation","Confirmation of unconditional attached (from vendor or vendor's solicitor)")}${uploadSlot("unconditionalConfirmation","")}</div>
+            <div class="checkRow">${chk("checklist.salePriceConfirmation","Confirmation of sale price attached (e.g. first page of the S&P agreement)")}${uploadSlot("salePriceConfirmation","")}</div>
+            <div class="checkRow">${chk("checklist.marketingReport","Marketing campaign report attached")}${uploadSlot("marketingReport","")}</div>
+            ${f.depositToTrust?`<div class="checkRow">${chk("checklist.spAgreement","Trust deal — sale and purchase agreement attached")}${uploadSlot("spAgreement","")}</div>`:""}</div>`)}
 
           ${section("13","Broker sign-off","",`<div class="grid">
             ${txt("brokerName","Signed for broker",{ph:"Full name",span:2,req:true})}
@@ -303,18 +336,27 @@
   function wire() {
     $("app").querySelectorAll("[data-path]").forEach((el) => {
       const path = el.dataset.path;
-      if (el.type === "checkbox") el.onchange = () => set(path, el.checked);
-      else if (el.tagName === "TEXTAREA") el.oninput = () => setNoRender(path, el.value);
-      else el.oninput = () => setNoRender(path, el.value);
-      // re-render on blur / change for selects & date pickers
-      if (el.tagName === "SELECT" || el.type === "date") el.onchange = () => set(path, el.value);
+      if (el.type === "checkbox") {
+        el.onchange = () => set(path, el.checked);
+      } else if (el.tagName === "SELECT" || el.type === "date") {
+        // no typing caret to preserve — safe to re-render
+        el.onchange = () => set(path, el.value);
+      } else {
+        // text / textarea: update state + summary only, NEVER re-render
+        // the form while typing (that was reversing text as the caret
+        // jumped back to the start on each keystroke)
+        el.oninput = () => setNoRender(path, el.value);
+        // numeric fields that drive table amounts recalc on blur
+        if (el.hasAttribute("data-recalc")) el.onchange = () => set(path, el.value);
+      }
     });
 
     const feeAdmin = $("feeAdmin"), feeMkt = $("feeMkt");
-    if (feeAdmin) feeAdmin.onchange = () => { state.f.comm.adminFee = true; state.f.comm.marketingFeeInstead = false; scheduleAutosave(); render(); };
-    if (feeMkt) feeMkt.onchange = () => { state.f.comm.marketingFeeInstead = true; state.f.comm.adminFee = false; scheduleAutosave(); render(); };
+    if (feeAdmin) feeAdmin.onchange = () => { state.f.comm.adminFee = feeAdmin.checked; scheduleAutosave(); render(); };
+    if (feeMkt) feeMkt.onchange = () => { state.f.comm.marketingFee = feeMkt.checked; scheduleAutosave(); render(); };
 
     setupPropertySearch();
+    setupUploads();
 
     $("sendBtn").onclick = onSend;
     const cm = $("confirmModal");
@@ -323,15 +365,77 @@
     cm.onclick = (e) => { if (e.target === cm) cm.classList.add("hidden"); };
   }
 
-  // update value without a full re-render (avoids caret jump while typing);
-  // recompute only the summary + save.
+  // Update value without touching the form DOM, so the caret stays put.
+  // Only the summary rail's derived numbers refresh.
   function setNoRender(path, val) {
     const keys = path.split("."); let o = state.f;
     for (let i = 0; i < keys.length - 1; i++) o = o[keys[i]];
     o[keys[keys.length - 1]] = val;
     scheduleAutosave();
-    refreshDerivedOnly();
+    updateSummary();
   }
+
+  // Recompute and patch just the summary rail + readiness, in place.
+  function updateSummary() {
+    const d = derive();
+    const missing = validate(d);
+    const f = state.f;
+    const rail = $("app").querySelector(".railCard");
+    if (!rail) return;
+    const dds = rail.querySelectorAll("dl dd");
+    // order matches the summary dl below: property, vendor, sale price, yield, total, split
+    if (dds[0]) dds[0].textContent = f.property.address || "—";
+    if (dds[1]) dds[1].textContent = f.vendor.name || "—";
+    if (dds[2]) dds[2].textContent = d.salePrice ? "$" + fmt(d.salePrice) : "—";
+    if (dds[3]) dds[3].textContent = d.yieldPct ? d.yieldPct.toFixed(2) + "%" : "—";
+    if (dds[4]) dds[4].textContent = "$" + fmt(d.totalInvoice);
+    if (dds[5]) { dds[5].textContent = d.splitPctTotal.toFixed(0) + "%"; dds[5].className = d.splitPctTotal && !d.splitsOk ? "bad" : ""; }
+    const readiness = rail.querySelector(".readiness");
+    if (readiness) readiness.innerHTML = missing.length === 0
+      ? '<span class="ok">✓ Ready to send</span>'
+      : `${missing.length} item${missing.length===1?"":"s"} outstanding`;
+  }
+
+  // ---------- file uploads ----------
+  function setupUploads() {
+    $("app").querySelectorAll(".upInput").forEach((inp) => {
+      inp.onchange = async () => {
+        const file = inp.files && inp.files[0];
+        if (!file) return;
+        const slot = inp.dataset.slot;
+        await uploadFile(slot, file);
+      };
+    });
+    $("app").querySelectorAll(".upRemove").forEach((btn) => {
+      btn.onclick = async () => {
+        const slot = btn.dataset.slot;
+        try { await api.removeAttachment(state.currentId, slot); } catch (e) { /* ignore */ }
+        delete state.f.attachments[slot];
+        scheduleAutosave();
+        render();
+      };
+    });
+  }
+
+  async function uploadFile(slot, file) {
+    // ensure the deal has an id to attach to
+    if (!state.currentId) {
+      try { const r = await api.saveDraft(state.f, null); state.currentId = r.id; }
+      catch (e) { alert("Couldn't start a draft to attach to: " + e.message); return; }
+    }
+    const prog = $("app").querySelector(`.upProgress[data-slot="${slot}"]`);
+    if (prog) prog.classList.remove("hidden");
+    try {
+      const meta = await api.uploadAttachment(state.currentId, slot, file);
+      state.f.attachments[slot] = { name: meta.name, path: meta.path, size: meta.size };
+      scheduleAutosave();
+      render();
+    } catch (e) {
+      if (prog) prog.classList.add("hidden");
+      alert("Upload failed: " + e.message);
+    }
+  }
+
   function refreshDerivedOnly() {
     // lightweight: re-render fully but preserve focus
     const active = document.activeElement;

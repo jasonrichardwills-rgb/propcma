@@ -38,6 +38,25 @@
     process: (id, nums) => call(`/${id}/process`, { method: "POST", body: nums }),
     invoice: (id) => call(`/${id}/invoice`, { method: "POST" }),
     returnToBroker: (id, note) => call(`/${id}/return`, { method: "POST", body: { note } }),
+
+    // ---- attachments ----
+    async uploadAttachment(id, slot, file) {
+      const token = await window.DealSheetAuth.getToken();
+      const fd = new FormData();
+      fd.append("slot", slot);
+      fd.append("file", file);
+      const res = await fetch(`${cfg.apiBase}/api/deal-sheets/${id}/attachments`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}` }, // no content-type; browser sets multipart boundary
+        body: fd,
+      });
+      const data = await res.json().catch(() => null);
+      if (!res.ok) throw new Error(data?.error || `Upload failed (${res.status})`);
+      return data; // { slot, name, path, size }
+    },
+    removeAttachment: (id, slot) => call(`/${id}/attachments?slot=${encodeURIComponent(slot)}`, { method: "DELETE" }),
+    // returns { url } — a short-lived signed download link
+    attachmentUrl: (id, slot) => call(`/${id}/attachments?slot=${encodeURIComponent(slot)}`),
   };
 
   // ───────────────────────── demo backend ────────────────────
@@ -63,9 +82,13 @@
         form: { depositToTrust: true, deposit: { amount: "171766.88", receiptNo: "1436758", method: "Direct credit" },
           checklist: { agencyAgreement: true, unconditionalConfirmation: true, salePriceConfirmation: true, marketingReport: true, spAgreement: true } },
         splits: [
-          { party_type: "salesperson", party_name: "OS", split_pct: 50, split_amount: 68295.13 },
-          { party_type: "salesperson", party_name: "CK", split_pct: 25, split_amount: 34147.57 },
-          { party_type: "salesperson", party_name: "SS", split_pct: 25, split_amount: 34147.57 },
+          { party_type: "salesperson", party_name: "Oliver", split_pct: 50, split_amount: 68295.13 },
+          { party_type: "salesperson", party_name: "Christian", split_pct: 25, split_amount: 34147.57 },
+          { party_type: "salesperson", party_name: "Sam", split_pct: 25, split_amount: 34147.57 },
+        ],
+        attachments: [
+          { slot: "agencyAgreement", file_name: "Agency_Agreement_Columbia_Ave.pdf", content_type: "application/pdf", size_bytes: 284000 },
+          { slot: "salePriceConfirmation", file_name: "SP_Agreement_p1.pdf", content_type: "application/pdf", size_bytes: 156000 },
         ],
         events: [{ created_at: "2026-07-13T09:12:00", note: "Submitted by broker", to_status: "submitted" }],
       },
@@ -137,6 +160,19 @@
       d.events.push({ created_at: new Date().toISOString(), note: `Returned to broker: ${note}`, to_status: "rejected" });
       return delay({ ok: true });
     },
+
+    // ---- attachments (demo: metadata only, no real storage) ----
+    uploadAttachment: (id, slot, file) => {
+      const d = findDeal(id);
+      if (d) { d.form = d.form || {}; d.form.attachments = d.form.attachments || {}; d.form.attachments[slot] = { name: file.name, path: `demo/${id}/${slot}`, size: file.size }; }
+      return delay({ slot, name: file.name, path: `demo/${id}/${slot}`, size: file.size });
+    },
+    removeAttachment: (id, slot) => {
+      const d = findDeal(id);
+      if (d && d.form && d.form.attachments) delete d.form.attachments[slot];
+      return delay({ ok: true });
+    },
+    attachmentUrl: (id, slot) => delay({ url: "#demo-file-" + slot }),
   };
 
   window.DealSheetApi = cfg.DEMO_MODE ? demo : live;

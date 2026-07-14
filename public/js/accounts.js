@@ -6,6 +6,7 @@
   const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) =>
     ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
   const fmt = (n) => Number(n || 0).toLocaleString("en-NZ", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const fmtSize = (b) => { b = Number(b||0); return b < 1024 ? b+" B" : b < 1048576 ? (b/1024).toFixed(0)+" KB" : (b/1048576).toFixed(1)+" MB"; };
 
   const META = {
     submitted:  { label: "Submitted",  cls: "sub" },
@@ -117,6 +118,10 @@
             `<tr><td>${esc(s.party_name)}</td><td class="r">${s.split_pct}%</td><td class="r mono">$${fmt(s.split_amount)}</td></tr>`).join("")||`<tr><td class="dim">No splits recorded</td></tr>`}</tbody></table>
           <h3>Mandatory checklist</h3>
           <ul class="checks">${checks.map((c) => `<li class="${c.ok?"":"bad"}">${c.label}</li>`).join("")}</ul>
+          ${(d.attachments && d.attachments.length) ? `<h3>Attachments</h3>
+          <ul class="attachList">${d.attachments.map((a) =>
+            `<li><span>📎 ${esc(a.file_name)} <span class="dim">(${fmtSize(a.size_bytes)})</span></span>
+             <button class="dlBtn" data-slot="${esc(a.slot)}">Download</button></li>`).join("")}</ul>` : ""}
         </section>
 
         <section class="panel actions">
@@ -153,6 +158,17 @@
     if (pb) { toggleProcess(); pb.onclick = doProcess; }
     const ib = $("invoiceBtn"); if (ib) ib.onclick = doInvoice;
     const rb = $("returnBtn"); if (rb) { rb.disabled = !state.note.trim(); rb.onclick = doReturn; }
+
+    el.querySelectorAll(".dlBtn").forEach((b) => {
+      b.onclick = async () => {
+        b.disabled = true; b.textContent = "Preparing…";
+        try {
+          const { url } = await api.attachmentUrl(state.deal.id, b.dataset.slot);
+          window.open(url, "_blank");
+        } catch (e) { alert("Could not get download link: " + e.message); }
+        finally { b.disabled = false; b.textContent = "Download"; }
+      };
+    });
   }
 
   function toggleProcess() {
