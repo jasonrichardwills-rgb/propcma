@@ -40,7 +40,7 @@
       billing: { name:"", phone:"", contactName:"", email:"", postalAddress:"", postcode:"", city:"", country:"NZ", fax:"" },
       invoicePurchaser: false,
       purchaser: { name:"", phone:"", contactName:"", email:"", postalAddress:"", postcode:"", city:"", country:"NZ", fax:"", solicitorName:"", solicitorFirm:"", solicitorPhone:"" },
-      sale: { dateOfAgreement:"", unconditionalDate:"", salePrice:"", rentalBasis:"Net", rentalIncome:"", yieldManual:"", titleType:"Freehold", landArea:"", wale:"", tenancies:"", occupiedArea:"", tenancySchedule:false },
+      sale: { dateOfAgreement:"", unconditionalDate:"", salePrice:"", rentalBasis:"Net", rentalIncome:"", yieldManual:"", titleType:"Freehold", landArea:"", wale:"", tenancies:"", occupiedArea:"", auction:false, tenancySchedule:false },
       depositToTrust: false,
       deposit: { amount:"", dateReceived:"", method:"Direct credit", receiptNo:"", earlyRelease:false, vendorAuthSent:false, vendorAuthReceived:false, purchaserAuthSent:false, purchaserAuthReceived:false },
       comm: { tiers:[{pct:"",base:""},{pct:"",base:""},{pct:"",base:""}], otherDesc:"", otherFee:"", adminFee:true, marketingFee:false, marketingJobNo:"", recoverMarketing:"", recoverJobNo:"", recoverOtherDesc:"", recoverOther:"" },
@@ -248,6 +248,7 @@
             ${sel("sale.titleType","Title",TITLES)}${txt("sale.landArea","Land area (sqm)")}
             ${txt("sale.wale","WALE (Years)")}
             ${txt("sale.tenancies","No. of tenancies (incl. sub-tenancies)")}${txt("sale.occupiedArea","Occupied by area (sqm)")}</div>
+            <div style="margin-top:10px">${chk("sale.auction","Sold at auction")}</div>
             <div style="margin-top:10px">${chk("sale.tenancySchedule","Tenancy schedule attached (if available)")}
               ${uploadSlot("tenancySchedule","optional — PDF or Excel")}</div>`)}
 
