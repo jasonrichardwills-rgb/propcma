@@ -22,7 +22,6 @@
     { code:"PC", name:"Phil" },{ code:"RM", name:"Rory" },{ code:"SR", name:"Sally" },
     { code:"SS", name:"Sam" },{ code:"TL", name:"Tom" },{ code:"WF", name:"Will" },
   ];
-  const BROKER_NAMES = BROKERS.map((b) => b.name);
   const TITLES = ["Freehold","Strata","Leasehold"];
   const PAY = ["Direct credit","Cheque","International transfer"];
   const BUYER = ["Advert","Sign","Website","Relationship","Target mailing","Referral","Canvassing","Other"];
@@ -33,7 +32,7 @@
     saveTimer: null,
     f: {
       propertyId: null,
-      ownership: { salesperson: "", division: "Industrial", office: "Christchurch" },
+      ownership: { salespeople: [], division: "Industrial", office: "Christchurch" },
       cmaLabel: "",
       property: { address:"", buildingName:"", propertyType:"", level:"", city:"Christchurch" },
       vendor: { name:"", phone:"", contactName:"", email:"", postalAddress:"", postcode:"", city:"", country:"NZ", fax:"", solicitorName:"", solicitorFirm:"", solicitorPhone:"", vendorGroup:"" },
@@ -83,7 +82,7 @@
 
   function validate(d) {
     const f = state.f, m = [];
-    if (!f.ownership.salesperson) m.push("Salesperson");
+    if (!f.ownership.salespeople.length) m.push("Salesperson");
     if (!f.property.address || !f.property.address.trim()) m.push("Property address");
     if (!f.vendor.name) m.push("Vendor name");
     if (!f.sale.dateOfAgreement) m.push("Date of agreement");
@@ -174,9 +173,12 @@
       <td><input class="cell" data-recalc data-path="comm.tiers.${i}.base" value="${esc(i===0 && !f.comm.tiers[i].base ? (d.salePrice?fmt(d.salePrice):"") : f.comm.tiers[i].base)}" placeholder="${i===0?"Sale price":"Amount"}" /></td>
       <td class="r mono">${d.tierFees[i]?fmt(d.tierFees[i]):"—"}</td></tr>`).join("");
 
+    // Section 9 split dropdowns offer only the brokers chosen in section 1
+    const dealBrokers = BROKERS.filter((b) => f.ownership.salespeople.includes(b.code));
     const splitRows = f.splits.map((s,i) => `<tr>
-      <td><select class="cell" data-path="splits.${i}.person"><option value="">Salesperson ${i+1}</option>
-        ${BROKER_NAMES.map((n) => `<option value="${esc(n)}" ${s.person===n?"selected":""}>${esc(n)}</option>`).join("")}
+      <td><select class="cell" data-path="splits.${i}.person">
+        <option value="">${dealBrokers.length?"Select…":"Add salespeople in section 1"}</option>
+        ${dealBrokers.map((b) => `<option value="${esc(b.name)}" ${s.person===b.name?"selected":""}>${esc(b.name)}</option>`).join("")}
         </select></td>
       <td><input class="cell" data-recalc data-path="splits.${i}.pct" value="${esc(s.pct)}" placeholder="%" /></td>
       <td class="r mono">${num(s.pct)?fmt((num(s.pct)/100)*d.totalInvoice):"—"}</td></tr>`).join("");
@@ -199,12 +201,19 @@
 
       <div class="layout">
         <main>
-          ${section("1","Deal ownership","",`<div class="grid">
-            <label class="fld"><span class="lbl">Salesperson<em class="req">*</em></span>
-              <select data-path="ownership.salesperson"><option value="">Select…</option>
-              ${BROKERS.map((b) => `<option value="${b.code}" ${f.ownership.salesperson===b.code?"selected":""}>${esc(b.name)} (${b.code})</option>`).join("")}
-              </select></label>
-            ${sel("ownership.division","Division",DIVISIONS)}${txt("ownership.office","Office")}</div>`)}
+          ${section("1","Deal ownership","Select every salesperson working this deal. Commission splits (section 9) can only be assigned to these people.",`
+            <div class="grid">
+              ${sel("ownership.division","Division",DIVISIONS)}${txt("ownership.office","Office")}
+            </div>
+            <div class="brokerPick">
+              <span class="lbl">Salesperson<em class="req">*</em>
+                <span class="dim">${f.ownership.salespeople.length} selected</span></span>
+              <div class="brokerGrid">
+                ${BROKERS.map((b) => `<label class="brokerChip ${f.ownership.salespeople.includes(b.code)?"on":""}">
+                  <input type="checkbox" class="brokerBox" value="${b.code}" ${f.ownership.salespeople.includes(b.code)?"checked":""} />
+                  <span>${esc(b.name)}</span></label>`).join("")}
+              </div>
+            </div>`)}
 
           ${section("2","Property details","Search PropCMA to pre-fill the address, land area and yield.",`
             <div class="cmaLink">
@@ -354,6 +363,24 @@
     const feeAdmin = $("feeAdmin"), feeMkt = $("feeMkt");
     if (feeAdmin) feeAdmin.onchange = () => { state.f.comm.adminFee = feeAdmin.checked; scheduleAutosave(); render(); };
     if (feeMkt) feeMkt.onchange = () => { state.f.comm.marketingFee = feeMkt.checked; scheduleAutosave(); render(); };
+
+    // Broker multi-select
+    $("app").querySelectorAll(".brokerBox").forEach((box) => {
+      box.onchange = () => {
+        const code = box.value;
+        const list = state.f.ownership.salespeople;
+        if (box.checked) {
+          if (!list.includes(code)) list.push(code);
+        } else {
+          state.f.ownership.salespeople = list.filter((c) => c !== code);
+          // clear any split row assigned to a broker no longer on the deal
+          const name = (BROKERS.find((b) => b.code === code) || {}).name;
+          state.f.splits.forEach((s) => { if (s.person === name) { s.person = ""; } });
+        }
+        scheduleAutosave();
+        render();
+      };
+    });
 
     setupPropertySearch();
     setupUploads();
@@ -535,7 +562,6 @@
     try {
       const account = await window.DealSheetAuth.init();
       if (!account) return; // redirecting to sign in
-      if (account.name) state.f.ownership.salesperson = state.f.ownership.salesperson || "";
     } catch (e) {
       $("gate").innerHTML = `<div class="inner">Sign-in failed: ${esc(e.message)}</div>`;
       return;
