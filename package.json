@@ -4,6 +4,7 @@
   "private": true,
   "dependencies": {
     "@supabase/supabase-js": "^2.110.3",
+    "busboy": "^1.6.0",
     "jose": "^6.2.3"
   }
 }
