@@ -13,6 +13,13 @@
       return account;
     }
 
+    if (typeof msal === "undefined") {
+      throw new Error(
+        "The Microsoft sign-in library didn't load (js/msal-browser.min.js). " +
+        "Check the file deployed correctly."
+      );
+    }
+
     msalApp = new msal.PublicClientApplication({
       auth: {
         clientId: cfg.msal.clientId,
