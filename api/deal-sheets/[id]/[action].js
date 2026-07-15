@@ -12,6 +12,7 @@ import { requireUser, sendError, HttpError } from "../../_lib/auth.js";
 import { supabase } from "../../_lib/supabase.js";
 import { computeDerived, validateForSubmit } from "../../_lib/deals.js";
 import { notifyAccounts } from "../../_lib/graph.js";
+import { pushToPropCMA } from "../../_lib/propcma.js";
 
 export default async function handler(req, res) {
   try {
@@ -109,13 +110,34 @@ async function invoice(req, res, deal) {
   if (deal.status !== "processing")
     throw new HttpError(409, `Cannot invoice from status '${deal.status}'`);
 
-  await transition(
+  const updated = await transition(
     deal,
     { status: "invoiced" },
     user.oid,
     "Invoice raised — commission approved"
   );
-  return res.status(200).json({ ok: true, status: "invoiced" });
+
+  // Write the completed sale into PropCMA's comparables data as a NEW
+  // row. Deliberately non-fatal: the deal is already invoiced, and a
+  // failed comparable write must not roll that back or block accounts.
+  // The outcome is recorded in the audit trail either way.
+  const pushed = await pushToPropCMA(updated);
+  await supabase.from("deal_sheet_events").insert({
+    deal_id: deal.id,
+    actor: user.oid,
+    from_status: "invoiced",
+    to_status: "invoiced",
+    note: pushed.ok
+      ? `Added to PropCMA comparables (properties id ${pushed.id})`
+      : `PropCMA comparable write FAILED — needs manual entry: ${pushed.error}`,
+  });
+
+  if (pushed.ok) {
+    await supabase.from("deal_sheets")
+      .update({ propcma_property_id: pushed.id }).eq("id", deal.id);
+  }
+
+  return res.status(200).json({ ok: true, status: "invoiced", propcma: pushed });
 }
 
 // ---------- accounts: return to broker with a reason ----------

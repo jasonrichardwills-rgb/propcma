@@ -18,7 +18,7 @@ export function computeDerived(form) {
   });
 
   const fixedFee =
-    form.comm?.marketingFeeInstead || form.comm?.adminFee ? 500 : 0;
+    (form.comm?.adminFee ? 500 : 0) + (form.comm?.marketingFee ? 500 : 0);
 
   const totalInvoice =
     tierFees.reduce((a, b) => a + b, 0) +
@@ -60,7 +60,9 @@ export function computeDerived(form) {
 export function toRow(form, derived) {
   const p = form.property || {};
   return {
-    salesperson: form.ownership?.salesperson || null,
+    // Comma-separated broker codes (e.g. "OS,CK,SS"). Per-broker amounts
+    // live in deal_sheet_splits — use that table for accurate reporting.
+    salesperson: (form.ownership?.salespeople || []).join(",") || null,
     division: form.ownership?.division || null,
     // Single free-text address, matching the PropCMA `Address` column
     // format (no consistent structure to split into parts).
@@ -86,7 +88,7 @@ export function validateForSubmit(form, derived) {
   const missing = [];
   const words = (form.press?.text || "").trim().split(/\s+/).filter(Boolean).length;
 
-  if (!form.ownership?.salesperson) missing.push("Salesperson");
+  if (!form.ownership?.salespeople?.length) missing.push("Salesperson");
   if (!form.property?.address || !form.property.address.trim()) missing.push("Property address");
   if (!form.vendor?.name) missing.push("Vendor name");
   if (!form.sale?.dateOfAgreement) missing.push("Date of agreement");
