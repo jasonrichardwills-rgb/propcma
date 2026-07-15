@@ -208,8 +208,26 @@
       $("gate").innerHTML = `<div class="inner">Sign-in failed: ${esc(e.message)}</div>`;
       return;
     }
+    try {
+      await loadQueue();
+    } catch (e) {
+      if (e.status === 403) {
+        // Two different 403s: not in app_users at all (message carries
+        // the Object ID), or provisioned but not accounts/manager.
+        const notSetUp = /Object ID/i.test(e.message || "");
+        $("gate").innerHTML = notSetUp
+          ? `<div class="inner gateMsg"><h2>Access not set up yet</h2>
+             <p>${esc(e.message)}</p>
+             <p class="dim">Send the Object ID above to your administrator.</p></div>`
+          : `<div class="inner gateMsg"><h2>Accounts access required</h2>
+             <p>This page is for the accounts team. Your account doesn't have that role.</p>
+             <p class="dim"><a href="deal-sheet.html">Go to the deal sheet form instead</a></p></div>`;
+        return;
+      }
+      $("gate").innerHTML = `<div class="inner">Couldn't load the queue: ${esc(e.message)}</div>`;
+      return;
+    }
     $("gate").classList.add("hidden");
     $("app").classList.remove("hidden");
-    await loadQueue();
   })();
 })();

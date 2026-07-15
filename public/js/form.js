@@ -567,6 +567,23 @@
       $("gate").innerHTML = `<div class="inner">Sign-in failed: ${esc(e.message)}</div>`;
       return;
     }
+    // Confirm the signed-in user is provisioned before showing the form,
+    // so a 403 surfaces here with the Object ID rather than as a
+    // confusing error on the first save.
+    if (!cfg.DEMO_MODE) {
+      try {
+        await api.listMine();
+      } catch (e) {
+        if (e.status === 403) {
+          $("gate").innerHTML = `<div class="inner gateMsg">
+            <h2>Access not set up yet</h2>
+            <p>${esc(e.message)}</p>
+            <p class="dim">Send the Object ID above to your administrator — they'll add you to the Deal Sheet app.</p></div>`;
+          return;
+        }
+        // other errors: let the form load; the action itself will report
+      }
+    }
     $("gate").classList.add("hidden");
     $("app").classList.remove("hidden");
     render();
