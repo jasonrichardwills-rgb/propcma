@@ -63,9 +63,15 @@ export async function requireUser(req, allowedRoles = null) {
 
   if (error) throw new HttpError(500, "User lookup failed");
   if (!user)
+    // Include the caller's own oid so an admin can provision them
+    // without chasing it up in Entra. Safe to echo: the token has
+    // already been cryptographically validated above, so this is the
+    // caller's own id being shown back to them — not a lookup of
+    // anyone else, and not a secret.
     throw new HttpError(
       403,
-      "Signed in with Microsoft, but not provisioned in app_users. Ask an administrator to add you."
+      `Signed in with Microsoft as ${payload.preferred_username || payload.email || "unknown"}, ` +
+      `but not set up in the Deal Sheet app. Ask an administrator to add this Object ID: ${oid}`
     );
 
   if (allowedRoles && !allowedRoles.includes(user.role))
