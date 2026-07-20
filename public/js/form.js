@@ -189,9 +189,12 @@
       <header class="top">
         <div class="brand"><span class="brandMark">SIC</span>
           <div><h1>Deal Sheet — Sales Record</h1><p>South Island Commercial (2004) Limited · Colliers</p></div></div>
-        <div class="accountsBox"><span class="tag">Completed by accounts</span>
+        <div style="text-align:right">
+          <a href="admin.html" class="linkBtn" style="display:inline-block;margin-bottom:8px">← All deal sheets</a>
+          <div class="accountsBox"><span class="tag">Completed by accounts</span>
           <div class="acctFields"><label><span>File No.</span><input disabled placeholder="—" /></label>
           <label><span>Deal No.</span><input disabled placeholder="—" /></label></div></div>
+        </div>
       </header>
       <p class="mandate">Complete <strong>all</strong> categories for commission to be paid promptly.
         Fields marked <em class="req">*</em> and the mandatory checklist must be complete before sending to accounts.</p>
