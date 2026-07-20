@@ -32,7 +32,6 @@
     listMine: () => call("?scope=mine"),
     saveDraft: (form, id) => call("", { method: "POST", body: { id, form } }),
     submit: (id) => call(`/${id}/submit`, { method: "POST" }),
-    searchProperties: (q) => call(`/properties?q=${encodeURIComponent(q)}`),
     get: (id) => call(`/${id}`),
     getQueue: (status) => call(`?scope=queue${status ? `&status=${status}` : ""}`),
     process: (id, nums) => call(`/${id}/process`, { method: "POST", body: nums }),
@@ -55,15 +54,50 @@
       return data; // { slot, name, path, size }
     },
     removeAttachment: (id, slot) => call(`/${id}/attachments?slot=${encodeURIComponent(slot)}`, { method: "DELETE" }),
+
+    // ---- reference data / settings ----
+    listBrokers: () => call("/settings?type=brokers"),
+    listAllBrokers: () => call("/settings?type=allBrokers"),
+    listAdmins: () => call("/settings?type=admins"),
+    saveBroker: (b) => call("/settings", { method: "POST", body: { type: "broker", ...b } }),
+    saveAdmin: (a) => call("/settings", { method: "POST", body: { type: "admin", ...a } }),
+    removeBroker: (code) => call(`/settings?type=broker&code=${encodeURIComponent(code)}`, { method: "DELETE" }),
+    removeAdmin: (oid) => call(`/settings?type=admin&oid=${encodeURIComponent(oid)}`, { method: "DELETE" }),
+
+    // ---- print ----
+    // Opens the server-rendered printable page in a new tab. The token
+    // can't ride in a header for a plain window.open, so the page is
+    // fetched and written into the new window instead.
+    async openPrint(id) {
+      const token = await window.DealSheetAuth.getToken();
+      const w = window.open("", "_blank");
+      if (!w) { alert("Please allow pop-ups to print."); return; }
+      w.document.write("<p style=\"font-family:Segoe UI,Arial,sans-serif;padding:20px\">Preparing print view…</p>");
+      const res = await fetch(`${cfg.apiBase}/api/deal-sheets/${id}/print`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!res.ok) { w.document.body.innerHTML = "<p>Could not load the print view.</p>"; return; }
+      const html = await res.text();
+      w.document.open(); w.document.write(html); w.document.close();
+    },
     // returns { url } — a short-lived signed download link
     attachmentUrl: (id, slot) => call(`/${id}/attachments?slot=${encodeURIComponent(slot)}`),
   };
 
   // ───────────────────────── demo backend ────────────────────
-  const demoProperties = [
-    { id: "cma-2041", label: "76 Columbia Ave, Hornby", address: "76 Columbia Ave, Hornby", propertyType: "Industrial — Warehouse", landArea: "1,850", occupiedArea: "2,450", annualRent: "", yield: "", wale: "", notes: "Modern high-stud warehouse with dual road frontage and generous yard, sold with vacant possession to an owner-occupier.", vendor: "Hodge Family Trust", purchaser: "", dealType: "Sale" },
-    { id: "cma-2044", label: "Victoria House, 112 Victoria St", address: "112 Victoria St, Christchurch Central", propertyType: "Office", landArea: "620", occupiedArea: "810", annualRent: "245000", yield: "7.5", wale: "4.2", notes: "A-grade CBD office building fully leased to established tenants, sold to a private investor on a passing yield of 7.5%.", vendor: "Victoria House Investments Ltd", purchaser: "", dealType: "Sale" },
-    { id: "cma-2052", label: "8B Foremans Rd, Islington", address: "Unit B, 8 Foremans Rd, Islington", propertyType: "Industrial — Yard & Store", landArea: "3,900", occupiedArea: "5,120", annualRent: "", yield: "", wale: "", notes: "Large securely-fenced industrial yard with storage building, leased to a national logistics operator.", vendor: "Foremans Road Trustee Ltd", purchaser: "", dealType: "Lease" },
+  const demoBrokers = [
+    { code:"AS", first_name:"Angus", email:null, active:true },
+    { code:"AB", first_name:"Annabelle", email:null, active:true },
+    { code:"CK", first_name:"Christian", email:"christian@example.com", active:true },
+    { code:"OS", first_name:"Oliver", email:"oliver@example.com", active:true },
+    { code:"SS", first_name:"Sam", email:null, active:true },
+    { code:"TL", first_name:"Tom", email:null, active:true },
+    { code:"WF", first_name:"Will", email:null, active:true },
+  ];
+  const demoAdmins = [
+    { oid:"demo-1", email:"breanna.hodges@collierscanterbury.com", display_name:"Breanna Hodges", role:"office_admin", active:true },
+    { oid:"demo-2", email:"anna.small@collierscanterbury.com", display_name:"Anna Small", role:"office_admin", active:true },
+    { oid:"demo-3", email:"nishu.singh@collierscanterbury.com", display_name:"Nishu Singh", role:"accounts", active:true },
   ];
 
   const demoStore = {
@@ -137,8 +171,6 @@
       d.events.push({ created_at: d.submitted_at, note: "Submitted by broker", to_status: "submitted" });
       return delay({ ok: true, status: "submitted", emailed: true });
     },
-    searchProperties: (q) =>
-      delay(demoProperties.filter((p) => p.label.toLowerCase().includes(q.toLowerCase()))),
     get: (id) => delay(findDeal(id)),
     getQueue: (status) =>
       delay(demoStore.deals.filter((d) => d.status !== "draft" && (!status || d.status === status))),
@@ -173,6 +205,32 @@
       return delay({ ok: true });
     },
     attachmentUrl: (id, slot) => delay({ url: "#demo-file-" + slot }),
+
+    listBrokers: () => delay(demoBrokers.filter((b) => b.active)),
+    listAllBrokers: () => delay(demoBrokers),
+    listAdmins: () => delay(demoAdmins),
+    saveBroker: (b) => {
+      const i = demoBrokers.findIndex((x) => x.code === b.code.toUpperCase());
+      const row = { code: b.code.toUpperCase(), first_name: b.firstName, email: b.email || null, active: true };
+      if (i >= 0) demoBrokers[i] = row; else demoBrokers.push(row);
+      demoBrokers.sort((a, z) => a.first_name.localeCompare(z.first_name));
+      return delay({ ok: true });
+    },
+    saveAdmin: (a) => {
+      const i = demoAdmins.findIndex((x) => x.oid === a.oid);
+      const row = { oid: a.oid, email: a.email || null, display_name: a.displayName || null, role: a.role || "office_admin", active: true };
+      if (i >= 0) demoAdmins[i] = row; else demoAdmins.push(row);
+      return delay({ ok: true });
+    },
+    removeBroker: (code) => {
+      const b = demoBrokers.find((x) => x.code === code); if (b) b.active = false;
+      return delay({ ok: true });
+    },
+    removeAdmin: (oid) => {
+      const a = demoAdmins.find((x) => x.oid === oid); if (a) a.active = false;
+      return delay({ ok: true });
+    },
+    openPrint: () => alert("Print preview isn't available in demo mode."),
   };
 
   window.DealSheetApi = cfg.DEMO_MODE ? demo : live;

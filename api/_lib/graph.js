@@ -29,7 +29,7 @@ async function graphToken() {
 const nzd = (n) =>
   Number(n || 0).toLocaleString("en-NZ", { style: "currency", currency: "NZD" });
 
-export async function notifyAccounts(deal) {
+export async function notifyAccounts(deal, ccEmails = []) {
   const link = `${process.env.APP_BASE_URL}/accounts/deals/${deal.id}`;
   const subject = `Deal sheet submitted — ${deal.property_address}${
     deal.deposit_to_trust ? " [TRUST]" : ""
@@ -69,6 +69,11 @@ export async function notifyAccounts(deal) {
           toRecipients: [
             { emailAddress: { address: process.env.ACCOUNTS_MAILBOX } },
           ],
+          // Brokers on the deal are CC'd so they know it's been filed.
+          // Brokers without an email on record are simply skipped.
+          ccRecipients: ccEmails.filter(Boolean).map((address) => ({
+            emailAddress: { address },
+          })),
         },
         saveToSentItems: true,
       }),

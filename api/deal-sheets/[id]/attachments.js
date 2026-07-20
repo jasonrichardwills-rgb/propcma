@@ -28,7 +28,7 @@ const ALLOWED = new Set([
 ]);
 const VALID_SLOTS = new Set([
   "tenancySchedule", "agencyAgreement", "unconditionalConfirmation",
-  "salePriceConfirmation", "marketingReport", "spAgreement",
+  "salePriceConfirmation", "marketingReport", "amlComplete", "spAgreement",
 ]);
 
 export default async function handler(req, res) {

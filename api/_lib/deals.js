@@ -8,7 +8,18 @@ const num = (v) => {
   return isNaN(n) ? 0 : n;
 };
 
-/** Recompute derived figures from the raw form payload. */
+/** Recompute derived figures from the raw form payload.
+ *
+ * Commission model (Option B):
+ *   - Total invoiced = tiers + other + admin fee + recoveries
+ *   - Third parties take their % of the COMMISSION (excl. the $500
+ *     administration fee — that's the office's cost recovery, not
+ *     commission, so conjunctional parties don't share it).
+ *   - Internal brokers split the REMAINDER (total invoiced less the
+ *     third-party share). Their % must total 100% of that remainder.
+ *   - Everything therefore reconciles: third-party $ + internal $
+ *     = total invoiced.
+ */
 export function computeDerived(form) {
   const salePrice = num(form.sale?.salePrice);
 
@@ -17,42 +28,54 @@ export function computeDerived(form) {
     return (num(t.pct) / 100) * base;
   });
 
-  const fixedFee =
-    (form.comm?.adminFee ? 500 : 0) + (form.comm?.marketingFee ? 500 : 0);
+  const adminFee = form.comm?.adminFee ? 500 : 0;
 
   const totalInvoice =
     tierFees.reduce((a, b) => a + b, 0) +
     num(form.comm?.otherFee) +
-    fixedFee +
+    adminFee +
     num(form.comm?.recoverMarketing) +
     num(form.comm?.recoverOther);
 
-  const splits = [
-    ...(form.splits || [])
-      .filter((s) => num(s.pct) > 0)
-      .map((s) => ({
-        party_type: "salesperson",
-        party_name: s.person || "(unnamed)",
-        split_pct: num(s.pct),
-        split_amount: +((num(s.pct) / 100) * totalInvoice).toFixed(2),
-      })),
-    ...(form.thirdParty || [])
-      .filter((s) => num(s.pct) > 0)
-      .map((s) => ({
-        party_type: "third_party",
-        party_name: s.name || "(unnamed)",
-        split_pct: num(s.pct),
-        split_amount: +((num(s.pct) / 100) * totalInvoice).toFixed(2),
-      })),
-  ];
+  // Base the third-party share is calculated on.
+  const commissionBase = totalInvoice - adminFee;
 
-  const splitPctTotal = splits.reduce((a, s) => a + s.split_pct, 0);
+  const thirdPartyRows = (form.thirdParty || [])
+    .filter((s) => num(s.pct) > 0)
+    .map((s) => ({
+      party_type: "third_party",
+      party_name: s.name || "(unnamed)",
+      split_pct: num(s.pct),
+      split_amount: +((num(s.pct) / 100) * commissionBase).toFixed(2),
+    }));
+
+  const thirdPartyTotal = thirdPartyRows.reduce((a, s) => a + s.split_amount, 0);
+  const thirdPartyPctTotal = thirdPartyRows.reduce((a, s) => a + s.split_pct, 0);
+
+  // What internal brokers divide between them.
+  const internalPool = +(totalInvoice - thirdPartyTotal).toFixed(2);
+
+  const internalRows = (form.splits || [])
+    .filter((s) => num(s.pct) > 0)
+    .map((s) => ({
+      party_type: "salesperson",
+      party_name: s.person || "(unnamed)",
+      split_pct: num(s.pct),
+      split_amount: +((num(s.pct) / 100) * internalPool).toFixed(2),
+    }));
+
+  const internalPctTotal = internalRows.reduce((a, s) => a + s.split_pct, 0);
 
   return {
     salePrice: +salePrice.toFixed(2),
     totalInvoice: +totalInvoice.toFixed(2),
-    splits,
-    splitPctTotal,
+    adminFee,
+    commissionBase: +commissionBase.toFixed(2),
+    thirdPartyTotal: +thirdPartyTotal.toFixed(2),
+    thirdPartyPctTotal,
+    internalPool,
+    internalPctTotal,
+    splits: [...internalRows, ...thirdPartyRows],
   };
 }
 
@@ -86,7 +109,6 @@ export function toRow(form, derived) {
 /** Submit-time validation. Returns [] when ready. */
 export function validateForSubmit(form, derived) {
   const missing = [];
-  const words = (form.press?.text || "").trim().split(/\s+/).filter(Boolean).length;
 
   if (!form.ownership?.salespeople?.length) missing.push("Salesperson");
   if (!form.property?.address || !form.property.address.trim()) missing.push("Property address");
@@ -95,10 +117,11 @@ export function validateForSubmit(form, derived) {
   if (!form.sale?.unconditionalDate) missing.push("Unconditional date");
   if (!derived.salePrice) missing.push("Sale price");
   if (!derived.totalInvoice) missing.push("Commission calculation");
-  if (derived.splits.length === 0) missing.push("Commission split");
-  else if (Math.abs(derived.splitPctTotal - 100) > 0.01)
-    missing.push("Commission split must total 100%");
-  if (words < 20) missing.push("Press release paragraph (20 words min)");
+  if (derived.internalPctTotal === 0) missing.push("Commission split");
+  else if (Math.abs(derived.internalPctTotal - 100) > 0.01)
+    missing.push("Salesperson split must total 100%");
+  if (derived.thirdPartyPctTotal >= 100)
+    missing.push("Third-party share must be under 100% of commission");
   if (!form.buyerSource) missing.push("Buyer source");
   if (!form.listingSource) missing.push("Listing source");
 
@@ -107,9 +130,9 @@ export function validateForSubmit(form, derived) {
   if (!c.unconditionalConfirmation) missing.push("Checklist — confirmation of unconditional");
   if (!c.salePriceConfirmation) missing.push("Checklist — confirmation of sale price");
   if (!c.marketingReport) missing.push("Checklist — marketing campaign report");
+  if (!c.amlComplete) missing.push("Checklist — AML complete");
   if (form.depositToTrust && !c.spAgreement)
     missing.push("Checklist — S&P agreement (trust deal)");
-  if (!form.brokerName) missing.push("Broker sign-off");
 
   return missing;
 }
