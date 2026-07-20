@@ -23,8 +23,14 @@ const num = (v) => {
 export function computeDerived(form) {
   const salePrice = num(form.sale?.salePrice);
 
-  const tierFees = (form.comm?.tiers || []).map((t, i) => {
-    const base = i === 0 && !t.base ? salePrice : num(t.base);
+  // Tiered commission: each tier's base is its typed amount, or the
+  // remainder of the sale price after the tiers above it. Mirrors the
+  // form's derive() so stored totals match what the user saw.
+  let remaining = salePrice;
+  const tierFees = (form.comm?.tiers || []).map((t) => {
+    const typed = t.base !== "" && t.base != null;
+    const base = typed ? num(t.base) : Math.max(remaining, 0);
+    remaining -= base;
     return (num(t.pct) / 100) * base;
   });
 
