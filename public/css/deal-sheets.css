@@ -272,3 +272,6 @@ tfoot td{border-top:2px solid var(--navy);border-bottom:none;font-weight:700;pad
 .compTable tbody tr:hover{background:#F8FAFD;cursor:pointer;}
 .linkBtn{background:none;border:none;color:var(--cyan);cursor:pointer;font-size:13px;
   text-decoration:underline;padding:0;font-family:inherit;}
+
+.doneBtns{display:flex;gap:10px;justify-content:center;flex-wrap:wrap;margin-top:8px;}
+.doneBtns .primary,.doneBtns .ghost{width:auto;}
