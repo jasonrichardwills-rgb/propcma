@@ -39,7 +39,7 @@ async function list(req, res) {
     return res.status(200).json(data);
   }
 
-  // scope=mine — any signed-in, provisioned user
+  // scope=mine — the deals this user filed.
   const user = await requireUser(req);
   const { data, error } = await supabase
     .from("deal_sheets")
@@ -71,13 +71,15 @@ async function save(req, res) {
     if (exErr || !existing) throw new HttpError(404, "Deal sheet not found");
     if (existing.created_by !== user.oid)
       throw new HttpError(403, "Not your deal sheet");
-    if (existing.status !== "draft")
-      throw new HttpError(409, "Only drafts can be edited. Contact accounts for changes.");
+    // Drafts and returned deals are editable. Once a deal is with
+    // accounts (submitted/processing/invoiced) it's locked.
+    if (!["draft", "rejected"].includes(existing.status))
+      throw new HttpError(409, "This deal is with accounts and can't be edited. Contact accounts for changes.");
 
     const { error } = await supabase.from("deal_sheets").update(row).eq("id", id);
     if (error) throw new HttpError(500, "Save failed");
     await replaceSplits(id, derived.splits);
-    return res.status(200).json({ id, status: "draft", ...derived });
+    return res.status(200).json({ id, status: existing.status, ...derived });
   }
 
   // Create
