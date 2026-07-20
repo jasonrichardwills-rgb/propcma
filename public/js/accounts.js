@@ -15,7 +15,9 @@
     rejected:   { label: "Returned",   cls: "rej" },
   };
 
-  const state = { queue: [], selectedId: null, deal: null, filter: "all", note: "", pendingNums: {} };
+  const state = { tab: "queue", queue: [], completed: [], selectedId: null, deal: null,
+    filter: "all", note: "", pendingNums: {},
+    brokers: [], admins: [], userRole: "" };
 
   async function loadQueue() {
     state.queue = await api.getQueue();
@@ -44,13 +46,15 @@
       ["unconditionalConfirmation", "Confirmation of unconditional"],
       ["salePriceConfirmation", "Confirmation of sale price"],
       ["marketingReport", "Marketing campaign report"],
+      ["amlComplete", "AML complete"],
     ];
     if (deal.deposit_to_trust) items.push(["spAgreement", "S&P agreement (trust deal)"]);
     return items.map(([k, label]) => ({ ok: !!c[k], label }));
   }
 
   function render() {
-    const shown = state.queue.filter((d) => state.filter === "all" || d.status === state.filter);
+    const shown = state.queue.filter((d) => d.status !== "invoiced")
+      .filter((d) => state.filter === "all" || d.status === state.filter);
 
     $("app").innerHTML = `
       <header class="top">
@@ -58,10 +62,17 @@
           <div><h1>Deal Sheet Processing</h1><p>Accounts · South Island Commercial (2004) Limited</p></div></div>
         <div class="counts">${counts()}</div>
       </header>
+      <div class="tabs">
+        <button class="tab ${state.tab==="queue"?"on":""}" data-tab="queue">Queue${
+          state.queue.filter((d)=>d.status!=="invoiced").length?`<span class="badge">${state.queue.filter((d)=>d.status!=="invoiced").length}</span>`:""}</button>
+        <button class="tab ${state.tab==="completed"?"on":""}" data-tab="completed">Completed</button>
+        <button class="tab ${state.tab==="settings"?"on":""}" data-tab="settings">Settings</button>
+      </div>
+      ${state.tab !== "queue" ? `<div id="tabBody"></div>` : `
       <div class="layout accounts">
         <aside class="queue">
           <div class="filters">
-            ${["all","submitted","processing","invoiced"].map((s) =>
+            ${["all","submitted","processing","rejected"].map((s) =>
               `<button class="fbtn ${state.filter===s?"on":""}" data-filter="${s}">${s==="all"?"All":META[s].label}</button>`).join("")}
           </div>
           ${shown.map((d) => `<button class="row ${state.selectedId===d.id?"sel":""}" data-id="${d.id}">
@@ -73,14 +84,130 @@
             || `<p class="empty">No deal sheets in this state.</p>`}
         </aside>
         <main id="detail"></main>
-      </div>`;
+      </div>`}`;
 
-    $("app").querySelectorAll("[data-filter]").forEach((b) =>
-      b.onclick = () => { state.filter = b.dataset.filter; render(); });
-    $("app").querySelectorAll("[data-id]").forEach((b) =>
-      b.onclick = async () => { await loadDeal(b.dataset.id); render(); });
+    $("app").querySelectorAll("[data-tab]").forEach((b) =>
+      b.onclick = async () => {
+        state.tab = b.dataset.tab;
+        if (state.tab === "completed" && !state.completed.length) await loadCompleted();
+        if (state.tab === "settings" && !state.brokers.length) await loadSettings();
+        render();
+      });
 
-    renderDetail();
+    if (state.tab === "queue") {
+      $("app").querySelectorAll("[data-filter]").forEach((b) =>
+        b.onclick = () => { state.filter = b.dataset.filter; render(); });
+      $("app").querySelectorAll("[data-id]").forEach((b) =>
+        b.onclick = async () => { await loadDeal(b.dataset.id); render(); });
+      renderDetail();
+    } else if (state.tab === "completed") {
+      renderCompleted();
+    } else {
+      renderSettings();
+    }
+  }
+
+  // ---------- completed ----------
+  async function loadCompleted() {
+    state.completed = await api.getQueue("invoiced");
+  }
+
+  function renderCompleted() {
+    const rows = [...state.completed].sort((a, b) =>
+      new Date(b.submitted_at || 0) - new Date(a.submitted_at || 0));
+    $("tabBody").innerHTML = rows.length ? `
+      <table class="compTable">
+        <thead><tr><th>Property</th><th>Vendor</th><th>Salespeople</th>
+          <th class="r">Invoiced</th><th>File / Deal</th><th>Date</th><th></th></tr></thead>
+        <tbody>${rows.map((d) => `<tr>
+          <td><strong>${esc(d.property_address || "—")}</strong></td>
+          <td>${esc(d.vendor_name || "—")}</td>
+          <td>${esc(d.salesperson || "—")}</td>
+          <td class="r mono">$${fmt(d.total_invoice_ex_gst)}</td>
+          <td>${esc(d.file_no || "—")} / ${esc(d.deal_no || "—")}</td>
+          <td>${d.submitted_at ? new Date(d.submitted_at).toLocaleDateString("en-NZ",{day:"2-digit",month:"short",year:"numeric"}) : "—"}</td>
+          <td class="r"><button class="linkBtn" data-print="${d.id}">Print</button></td>
+        </tr>`).join("")}</tbody></table>`
+      : `<p class="empty">No completed deals yet.</p>`;
+    $("tabBody").querySelectorAll("[data-print]").forEach((b) =>
+      b.onclick = () => api.openPrint(b.dataset.print));
+  }
+
+  // ---------- settings ----------
+  async function loadSettings() {
+    [state.brokers, state.admins] = await Promise.all([
+      api.listAllBrokers(), api.listAdmins(),
+    ]);
+  }
+
+  function renderSettings() {
+    $("tabBody").innerHTML = `<div class="setGrid">
+      <div class="setCard">
+        <h3>Brokers</h3>
+        <p class="note">Selectable on deal sheets and CC'd when a deal is sent to accounts.
+          Brokers don't sign in — Office Administrators file on their behalf.</p>
+        ${state.brokers.map((b) => `<div class="setRow ${b.active?"":"inactive"}">
+          <span class="nm">${esc(b.first_name)} <span class="dim">(${esc(b.code)})</span></span>
+          <span class="em">${esc(b.email || "no email — won't be CC'd")}</span>
+          ${b.active ? `<button data-rmb="${esc(b.code)}">Remove</button>` : `<span class="rl">removed</span>`}
+        </div>`).join("") || `<p class="empty">No brokers yet.</p>`}
+        <div class="addForm">
+          <input id="bCode" placeholder="Code (e.g. OS)" maxlength="4" style="max-width:110px" />
+          <input id="bName" placeholder="First name" />
+          <input id="bEmail" placeholder="Email" type="email" />
+          <button id="bAdd">Add / update</button>
+        </div>
+      </div>
+
+      <div class="setCard">
+        <h3>Office administrators &amp; accounts</h3>
+        <p class="note">People who can sign in. Office administrators file deal sheets;
+          accounts and managers process them and manage these settings.</p>
+        ${state.admins.map((a) => `<div class="setRow ${a.active?"":"inactive"}">
+          <span class="nm">${esc(a.display_name || "—")}</span>
+          <span class="em">${esc(a.email || "")}</span>
+          <span class="rl">${esc(a.role.replace("_"," "))}</span>
+          ${a.active ? `<button data-rma="${esc(a.oid)}">Remove</button>` : `<span class="rl">removed</span>`}
+        </div>`).join("") || `<p class="empty">None yet.</p>`}
+        <div class="addForm">
+          <input id="aOid" placeholder="Entra Object ID" />
+          <input id="aName" placeholder="Full name" />
+          <input id="aEmail" placeholder="Email" type="email" />
+          <select id="aRole">
+            <option value="office_admin">Office administrator</option>
+            <option value="accounts">Accounts</option>
+            <option value="manager">Manager</option>
+          </select>
+          <button id="aAdd">Add / update</button>
+        </div>
+        <p class="tiny">The Object ID comes from Entra ID (Users → select person → Object ID),
+          or from the "Access not set up yet" message they see when they first sign in.</p>
+      </div>
+    </div>`;
+
+    $("bAdd").onclick = async () => {
+      const code = $("bCode").value.trim(), firstName = $("bName").value.trim();
+      if (!code || !firstName) return alert("Code and first name are required.");
+      try { await api.saveBroker({ code, firstName, email: $("bEmail").value.trim() });
+        await loadSettings(); render(); } catch (e) { alert("Couldn't save: " + e.message); }
+    };
+    $("aAdd").onclick = async () => {
+      const oid = $("aOid").value.trim();
+      if (!oid) return alert("Object ID is required.");
+      try { await api.saveAdmin({ oid, displayName: $("aName").value.trim(),
+          email: $("aEmail").value.trim(), role: $("aRole").value });
+        await loadSettings(); render(); } catch (e) { alert("Couldn't save: " + e.message); }
+    };
+    $("tabBody").querySelectorAll("[data-rmb]").forEach((b) => b.onclick = async () => {
+      if (!confirm(`Remove ${b.dataset.rmb} from the broker list? Past deal sheets keep their record.`)) return;
+      try { await api.removeBroker(b.dataset.rmb); await loadSettings(); render(); }
+      catch (e) { alert("Couldn't remove: " + e.message); }
+    });
+    $("tabBody").querySelectorAll("[data-rma]").forEach((b) => b.onclick = async () => {
+      if (!confirm("Remove this person's access?")) return;
+      try { await api.removeAdmin(b.dataset.rma); await loadSettings(); render(); }
+      catch (e) { alert("Couldn't remove: " + e.message); }
+    });
   }
 
   function renderDetail() {
@@ -97,7 +224,10 @@
       <div class="detailHead">
         <div><h2>${esc(d.property_address||"—")}</h2>
           <p class="dim">Submitted ${d.submitted_at?new Date(d.submitted_at).toLocaleString("en-NZ"):"—"} · Broker ${esc(d.salesperson||"")} · ${esc(d.division||"")}</p></div>
-        <span class="pill big ${META[d.status].cls}">${META[d.status].label}</span>
+        <div style="text-align:right">
+          <span class="pill big ${META[d.status].cls}">${META[d.status].label}</span>
+          <div><button class="linkBtn" id="printDeal" style="margin-top:8px">Print / Save as PDF</button></div>
+        </div>
       </div>
       <div class="cols">
         <section class="panel">
@@ -112,7 +242,7 @@
           ${d.form && d.form.deposit && d.deposit_to_trust ? `<h3>Trust deposit</h3><dl>
             <div><dt>Amount</dt><dd>$${fmt(d.form.deposit.amount)}</dd></div>
             <div><dt>Receipt no.</dt><dd>${esc(d.form.deposit.receiptNo||"—")}</dd></div>
-            <div><dt>Method</dt><dd>${esc(d.form.deposit.method||"—")}</dd></div></dl>` : ""}
+</dl>` : ""}
           <h3>Commission split</h3>
           <table class="tbl"><tbody>${splits.map((s) =>
             `<tr><td>${esc(s.party_name)}</td><td class="r">${s.split_pct}%</td><td class="r mono">$${fmt(s.split_amount)}</td></tr>`).join("")||`<tr><td class="dim">No splits recorded</td></tr>`}</tbody></table>
@@ -154,6 +284,9 @@
     const note = $("returnNote");
     if (note) note.oninput = () => { state.note = note.value; const rb = $("returnBtn"); if (rb) rb.disabled = !note.value.trim(); };
 
+    const prb = $("printDeal");
+    if (prb) prb.onclick = () => api.openPrint(state.deal.id);
+
     const pb = $("processBtn");
     if (pb) { toggleProcess(); pb.onclick = doProcess; }
     const ib = $("invoiceBtn"); if (ib) ib.onclick = doInvoice;
@@ -172,6 +305,9 @@
   }
 
   function toggleProcess() {
+    const prb = $("printDeal");
+    if (prb) prb.onclick = () => api.openPrint(state.deal.id);
+
     const pb = $("processBtn"); if (!pb) return;
     const checks = checklistOf(state.deal);
     const ok = checks.every((c) => c.ok) && state.pendingNums.fileNo.trim() && state.pendingNums.dealNo.trim();
