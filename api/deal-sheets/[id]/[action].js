@@ -81,7 +81,17 @@ async function submit(req, res, deal) {
     "Submitted by broker"
   );
 
-  const emailed = await notifyAccounts(updated); // logs, never throws
+  // CC the brokers on the deal so they know it's been filed.
+  // Brokers with no email on record are skipped, not an error.
+  let ccEmails = [];
+  const codes = deal.form?.ownership?.salespeople || [];
+  if (codes.length) {
+    const { data: rows } = await supabase
+      .from("brokers").select("email").in("code", codes);
+    ccEmails = (rows || []).map((r) => r.email).filter(Boolean);
+  }
+
+  const emailed = await notifyAccounts(updated, ccEmails); // logs, never throws
   return res.status(200).json({ ok: true, status: "submitted", emailed });
 }
 
