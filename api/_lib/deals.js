@@ -109,7 +109,6 @@ export function toRow(form, derived) {
 /** Submit-time validation. Returns [] when ready. */
 export function validateForSubmit(form, derived) {
   const missing = [];
-  const words = (form.press?.text || "").trim().split(/\s+/).filter(Boolean).length;
 
   if (!form.ownership?.salespeople?.length) missing.push("Salesperson");
   if (!form.property?.address || !form.property.address.trim()) missing.push("Property address");
@@ -123,7 +122,6 @@ export function validateForSubmit(form, derived) {
     missing.push("Salesperson split must total 100%");
   if (derived.thirdPartyPctTotal >= 100)
     missing.push("Third-party share must be under 100% of commission");
-  if (words < 20) missing.push("Press release paragraph (20 words min)");
   if (!form.buyerSource) missing.push("Buyer source");
   if (!form.listingSource) missing.push("Listing source");
 
