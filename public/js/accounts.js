@@ -21,6 +21,11 @@
 
   async function loadQueue() {
     state.queue = await api.getQueue();
+    // Deep-link from the notification email: ?id=<dealId> preselects it.
+    const linkedId = new URLSearchParams(location.search).get("id");
+    if (linkedId && state.queue.some((d) => d.id === linkedId)) {
+      state.selectedId = linkedId;
+    }
     if (!state.selectedId && state.queue.length) state.selectedId = state.queue[0].id;
     if (state.selectedId) await loadDeal(state.selectedId);
     render();
