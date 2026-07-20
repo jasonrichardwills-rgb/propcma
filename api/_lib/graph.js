@@ -30,7 +30,7 @@ const nzd = (n) =>
   Number(n || 0).toLocaleString("en-NZ", { style: "currency", currency: "NZD" });
 
 export async function notifyAccounts(deal, ccEmails = []) {
-  const link = `${process.env.APP_BASE_URL}/accounts/deals/${deal.id}`;
+  const link = `${process.env.APP_BASE_URL}/accounts.html?id=${deal.id}`;
   const subject = `Deal sheet submitted — ${deal.property_address}${
     deal.deposit_to_trust ? " [TRUST]" : ""
   }`;
