@@ -509,13 +509,34 @@ CARD_BOT  = 26    # bottom padding
 CARD_GAP  = 16.5  # grid gap
 
 def fmt_month_year(s):
-    """'03/2024' from a sale date; falls back to raw string."""
+    """Short 'Jun 2026' from a sale date in many possible formats.
+    Falls back to a trimmed raw string (never a long overflowing one)."""
     if not s: return '—'
     s = str(s).strip()
-    for f in ('%d/%m/%Y','%d-%m-%Y','%d.%m.%Y','%Y-%m-%d','%d %b %Y','%d %B %Y','%b %Y','%B %Y','%m/%Y','%m-%Y'):
-        try: return datetime.strptime(s, f).strftime('%m/%Y')
-        except ValueError: pass
-    return s
+    fmts = (
+        '%A, %B %d, %Y',   # Friday, June 26, 2026
+        '%A %B %d, %Y', '%B %d, %Y', '%b %d, %Y',
+        '%d/%m/%Y', '%d-%m-%Y', '%d.%m.%Y', '%Y-%m-%d',
+        '%d %b %Y', '%d %B %Y', '%b %Y', '%B %Y',
+        '%m/%Y', '%m-%Y', '%Y/%m/%d',
+    )
+    for f in fmts:
+        try:
+            return datetime.strptime(s, f).strftime('%b %Y')  # e.g. 'Jun 2026'
+        except ValueError:
+            pass
+    # Last resort: try to pull a month name + year out of the string
+    import re as _re
+    m = _re.search(r'([A-Za-z]{3,9})\D+(\d{4})', s)
+    if m:
+        for f in ('%B', '%b'):
+            try:
+                mn = datetime.strptime(m.group(1)[:9], f)
+                return f'{mn.strftime("%b")} {m.group(2)}'
+            except ValueError:
+                pass
+    # Give up gracefully — return something short, not a long overflow.
+    return s[:8]
 
 def draw_sales_card(c, x, y, w, h, prop, api_key):
     """One comparable-sales card. (x,y) = bottom-left."""
