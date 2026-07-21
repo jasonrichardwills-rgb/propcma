@@ -583,9 +583,14 @@ def draw_sales_card(c, x, y, w, h, prop, api_key):
     while c.stringWidth(addr, 'Helvetica-Bold', 11) > w - pad*2 and len(addr) > 4:
         addr = addr[:-2].rstrip() + '…'
     c.drawString(x+pad, ty, addr)
-    # Price row
-    ty -= 21
+    # Price row — with a "SALE PRICE" label above it
+    ty -= 15
+    c.setFont('Helvetica', 6.8)
+    c.setFillColor(INK_FAINT)
+    c.drawString(x+pad, ty, 'SALE PRICE')
+    ty -= 20
     c.setFont('Helvetica-Bold', 18)
+    c.setFillColor(INK_DARK)
     price = fmt_price(prop.get('sale_price'))
     c.drawString(x+pad, ty, price)
     psm = prop.get('price_per_sqm')
@@ -593,18 +598,18 @@ def draw_sales_card(c, x, y, w, h, prop, api_key):
         c.setFont('Helvetica', 9)
         c.setFillColor(INK_SOFT)
         c.drawString(x+pad + c.stringWidth(price,'Helvetica-Bold',18) + 10, ty+1, f'{fmt_psm(psm)} /m²')
-    # Stat row: Net yield | Building | Land area | Date sold
-    ty -= 12
+    # Stat row: Net yield | Floor area | Land area | Sale date
+    ty -= 14
     stats = [
-        ('NET YIELD', f"{prop['initial_yield']:.1f}%" if prop.get('initial_yield') else '—', ''),
-        ('BUILDING',  fmt_num(prop.get('land_area')) if prop.get('land_area') else '—', ' m²' if prop.get('land_area') else ''),
-        ('LAND AREA', fmt_num(prop.get('sqm')) if prop.get('sqm') else '—', ' m²' if prop.get('sqm') else ''),
-        ('DATE SOLD', fmt_month_year(prop.get('sale_date')), ''),
+        ('NET YIELD',  f"{prop['initial_yield']:.1f}%" if prop.get('initial_yield') else '—', ''),
+        ('FLOOR AREA', fmt_num(prop.get('land_area')) if prop.get('land_area') else '—', ' m²' if prop.get('land_area') else ''),
+        ('LAND AREA',  fmt_num(prop.get('sqm')) if prop.get('sqm') else '—', ' m²' if prop.get('sqm') else ''),
+        ('SALE DATE',  fmt_month_year(prop.get('sale_date')), ''),
     ]
     col_w = (w - pad*2) / 4
     for i, (lbl, val, suffix) in enumerate(stats):
         sx = x + pad + i*col_w
-        c.setFont('Helvetica', 6.8)
+        c.setFont('Helvetica', 6.5)
         c.setFillColor(INK_FAINT)
         c.drawString(sx, ty, lbl)
         c.setFont('Helvetica-Bold', 8.5)
@@ -632,28 +637,21 @@ def draw_sales_card(c, x, y, w, h, prop, api_key):
             ty -= 10
 
 def draw_card_page_header(c, page_idx, total_grid_pages):
-    top_y = H - CARD_TOP
-    c.setFont('Helvetica-Bold', 8.25)
-    c.setFillColor(ACCENT)
-    label = f'COMPARABLE SALES · PAGE {page_idx+1} OF {total_grid_pages}'
-    c.drawString(CARD_MX, top_y - 8, ' '.join(label))  # letter-spaced
+    # Use the same navy top bar as the other inner pages, then the
+    # section title beneath it (no "page X of Y" label).
+    header_bar(c, 'Comparable Sales')
+    top_y = H - 36            # below the navy bar
     c.setFont('Helvetica-Bold', 21)
     c.setFillColor(INK_DARK)
-    c.drawString(CARD_MX, top_y - 30, 'Comparable Sales')
+    c.drawString(CARD_MX, top_y - 26, 'Comparable Sales')
     c.setStrokeColor(ACCENT)
     c.setLineWidth(1.5)
-    c.line(CARD_MX, top_y - 41, W - CARD_MX, top_y - 41)
-    return top_y - 41 - 19.5  # grid top
+    c.line(CARD_MX, top_y - 37, W - CARD_MX, top_y - 37)
+    return top_y - 37 - 19.5  # grid top
 
 def draw_card_page_footer(c, page_num, total_pages):
-    fy = CARD_BOT
-    c.setStrokeColor(CARD_BRD)
-    c.setLineWidth(0.6)
-    c.line(CARD_MX, fy + 12, W - CARD_MX, fy + 12)
-    c.setFont('Helvetica', 7.1)
-    c.setFillColor(INK_FAINT)
-    c.drawString(CARD_MX, fy, 'South Island Commercial Limited – Licensed under the REAA 2008')
-    c.drawRightString(W - CARD_MX, fy, f'Page {page_num} of {total_pages}   ·   Confidential — for client use only')
+    # Same navy footer bar as the other pages.
+    footer(c, page_num, total_pages)
 
 
 # ── Main report builder ───────────────────────────────────────
@@ -786,12 +784,23 @@ def build_report(data, output_path):
         c.drawCentredString(right_cx, H/2 + 28, f'{fmt_price(est_low)} – {fmt_price(est_high)}')
         c.setFont('Helvetica', 12)
         c.setFillColor(NAVY)
-        if psm_low and psm_high:
-            c.drawCentredString(right_cx, H/2 + 2, f'at {fmt_psm(psm_low)} – {fmt_psm(psm_high)} /m²')
-        if subject_sqm:
-            c.setFont('Helvetica', 10)
-            c.setFillColor(DGREY)
-            c.drawCentredString(right_cx, H/2 - 18, f'× {fmt_num(subject_sqm)} m²  subject land area')
+        basis = data.get('valuation_basis', 'psm')
+        subj_rent = data.get('subject_rent')
+        subj_yield = data.get('subject_yield')
+        if basis == 'income' and subj_yield:
+            # Income-based: show the yield the value is capitalised at.
+            c.drawCentredString(right_cx, H/2 + 2, f'at {subj_yield:.2f}% net yield')
+            if subj_rent:
+                c.setFont('Helvetica', 10)
+                c.setFillColor(DGREY)
+                c.drawCentredString(right_cx, H/2 - 18, f'on {fmt_price(subj_rent)} annual rent  ·  income basis')
+        else:
+            if psm_low and psm_high:
+                c.drawCentredString(right_cx, H/2 + 2, f'at {fmt_psm(psm_low)} – {fmt_psm(psm_high)} /m²')
+            if subject_sqm:
+                c.setFont('Helvetica', 10)
+                c.setFillColor(DGREY)
+                c.drawCentredString(right_cx, H/2 - 18, f'× {fmt_num(subject_sqm)} m²  subject land area')
 
     # Footer on cover
     footer(c, 1, total_pages)
