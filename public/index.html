@@ -210,6 +210,8 @@ input[type=checkbox]{cursor:pointer;accent-color:var(--cb);}
           <span class="chip" data-val="Industrial">Industrial</span>
           <span class="chip" data-val="Retail">Retail</span>
           <span class="chip" data-val="Investment">Investment</span>
+          <span class="chip" data-val="Office">Office</span>
+          <span class="chip" data-val="Land">Land</span>
         </div>
       </div>
       <div class="sidebar-section">
@@ -2055,7 +2057,7 @@ function openEdit(propId,event){
   document.getElementById('so-address-display').textContent=p.address||'—';
   document.getElementById('so-date-display').textContent=p.saleDate||'—';
   // Category dropdown — always editable so incorrect values can be fixed
-  const KNOWN_CATS=['','Commercial','Industrial','Retail','Investment'];
+  const KNOWN_CATS=['','Commercial','Industrial','Retail','Investment','Office','Land'];
   const catSel=document.getElementById('so-category');
   catSel.innerHTML=KNOWN_CATS.map(v=>`<option value="${v}">${v||'—'}</option>`).join('');
   if(p.category&&!KNOWN_CATS.includes(p.category)){const o=document.createElement('option');o.value=o.textContent=p.category;catSel.appendChild(o);}
