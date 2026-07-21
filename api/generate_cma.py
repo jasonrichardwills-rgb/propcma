@@ -393,7 +393,7 @@ TBL_COLS = [120, 112, 48, 52, 58, 95, 70]   # sums to 555 = A4 width - 2*20
 
 def draw_table_header(c, y):
     """Bold navy column headers, per the layout document."""
-    labels = ['', 'Address', '$/m²', 'Land SQM', 'Sale Price', 'Date Sold', 'Broker Name']
+    labels = ['', 'Address', '$/m²', 'Building SQM', 'Sale Price', 'Date Sold', 'Net Yield %']
     c.setFont('Helvetica-Bold', 10)
     c.setFillColor(NAVY)
     x = TBL_X
@@ -411,9 +411,13 @@ def draw_property_row(c, y, row_h, prop, api_key):
     x = TBL_X
     pad = 4
     # ── Photo cell with category + sale badges ──
-    ph_h = row_h - 10
+    # The row splits into an upper band (photo + detail columns) and a
+    # lower band for Notes. Reserve ~30pt at the bottom when notes exist.
+    has_notes = bool((prop.get('notes') or '').strip())
+    notes_band = 32 if has_notes else 0
+    ph_h = row_h - 10 - notes_band
     ph_w = TBL_COLS[0] - 8
-    ph_y = y + 5
+    ph_y = y + 5 + notes_band
     c.setFillColor(LGREY)
     c.roundRect(x, ph_y, ph_w, ph_h, 3, fill=1, stroke=0)
     # Prefer an uploaded property photo; fall back to Street View
@@ -466,8 +470,9 @@ def draw_property_row(c, y, row_h, prop, api_key):
         c.setFillColor(ls_col)
         c.drawCentredString(bx + bw/2, by + 3, ls)
 
-    # ── Detail columns — navy text, vertically centred ──
-    cy_mid = y + row_h / 2
+    # ── Detail columns — navy text, aligned to the top of the photo
+    #    band so they sit beside the photo, with Notes in the band below. ──
+    top_anchor = ph_y + ph_h - 10
     x = TBL_X + TBL_COLS[0]
     cells = [
         ('Helvetica', 8.5, _wrap(c, prop.get('address') or '—', 'Helvetica', 8.5, TBL_COLS[1] - pad*2)),
@@ -475,18 +480,35 @@ def draw_property_row(c, y, row_h, prop, api_key):
         ('Helvetica', 8.5, [fmt_num(prop.get('sqm'))]),
         ('Helvetica', 8.5, [fmt_price(prop.get('sale_price'))]),
         ('Helvetica', 8.5, _wrap(c, fmt_full_date(prop.get('sale_date')), 'Helvetica', 8.5, TBL_COLS[5] - pad*2)),
-        ('Helvetica', 8.5, _wrap(c, prop.get('broker') or '—', 'Helvetica', 8.5, TBL_COLS[6] - pad*2)),
+        ('Helvetica', 8.5, [f"{prop.get('initial_yield'):.1f}%" if prop.get('initial_yield') not in (None, '') else '—']),
     ]
     c.setFillColor(NAVY)
     for w, (font, size, lines) in zip(TBL_COLS[1:], cells):
         c.setFont(font, size)
         lh = size + 2.5
-        block_h = lh * len(lines)
-        ty = cy_mid + block_h/2 - size
+        ty = top_anchor
         for ln in lines:
             c.drawString(x + pad, ty, ln)
             ty -= lh
         x += w
+
+    # ── Notes (item 5): in the reserved lower band, aligned with the
+    #    Address column, up to 3 lines, spanning to the right edge. ──
+    if has_notes:
+        notes = (prop.get('notes') or '').strip()
+        notes_x = TBL_X + TBL_COLS[0]
+        notes_w = sum(TBL_COLS[1:]) - pad*2
+        nlines = _wrap(c, notes, 'Helvetica-Oblique', 7.5, notes_w)[:3]
+        ny = y + 5 + notes_band - 9        # top of the notes band
+        c.setFont('Helvetica-Bold', 6)
+        c.setFillColor(DGREY)
+        c.drawString(notes_x + pad, ny, 'NOTES')
+        c.setFont('Helvetica-Oblique', 7.5)
+        ny -= 8.5
+        for ln in nlines:
+            c.drawString(notes_x + pad, ny, ln)
+            ny -= 8.5
+
     # Row separator
     c.setStrokeColor(MGREY)
     c.setLineWidth(0.4)
@@ -515,7 +537,7 @@ def build_report(data, output_path):
     adj_psm = data.get('adjusted_psm')
 
     # Count pages: 1 cover + 1 summary + N table pages (8 rows per page)
-    per_page = 8
+    per_page = 6   # reduced from 8 to make room for the Notes line under each comp
     grid_pages = max(1, -(-len(props) // per_page))  # ceiling div
     total_pages = 2 + grid_pages
 
