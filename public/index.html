@@ -448,6 +448,20 @@ input[type=checkbox]{cursor:pointer;accent-color:var(--cb);}
                 <label style="font-size:12px;color:var(--ink2);font-weight:500;">Subject land area (m²)</label>
                 <input type="number" id="subject-sqm" value="1000" style="width:120px;" oninput="recalcVal()">
               </div>
+              <div style="margin-top:14px;padding-top:12px;border-top:1px solid var(--paper2);">
+                <div style="font-size:12px;color:var(--ink2);font-weight:600;margin-bottom:8px;">Income-based valuation <span style="font-weight:400;color:var(--ink3);">(optional — overrides $/m² when both are set)</span></div>
+                <div style="display:flex;gap:16px;flex-wrap:wrap;align-items:center;">
+                  <div style="display:flex;gap:8px;align-items:center;">
+                    <label style="font-size:12px;color:var(--ink2);font-weight:500;">Subject annual rent</label>
+                    <input type="text" id="subject-rent" inputmode="numeric" autocomplete="off" placeholder="$0" style="width:130px;" oninput="onRentInput(this)">
+                  </div>
+                  <div style="display:flex;gap:8px;align-items:center;">
+                    <label style="font-size:12px;color:var(--ink2);font-weight:500;">Target net yield</label>
+                    <input type="number" id="subject-yield" step="0.1" placeholder="—" style="width:80px;" oninput="recalcVal()"> <span style="font-size:12px;color:var(--ink2);">%</span>
+                  </div>
+                  <div id="yield-implied" style="font-size:12px;color:var(--ink3);"></div>
+                </div>
+              </div>
               <div class="val-result">
                 <div>
                   <div class="val-result-label">Estimated value range</div>
@@ -1849,12 +1863,45 @@ function recalcVal(){
   document.getElementById('adj-size-r').textContent='$'+fmtNum(Math.round(med*(1+size/100)));
   document.getElementById('adj-age-r').textContent='$'+fmtNum(Math.round(med*(1+size/100)*(1+age/100)));
   document.getElementById('adj-loc-r').textContent='$'+fmtNum(Math.round(adj));
-  // Best practice: present an estimation range of ~10% total spread (±5% around the point estimate)
-  const est=adj*sqm;
-  const rnd=v=>Math.round(v/1000)*1000;  // to nearest $1,000
-  document.getElementById('est-low').value=est?fmtCurrencyInput(rnd(est*0.95)):'';
-  document.getElementById('est-high').value=est?fmtCurrencyInput(rnd(est*1.05)):'';
+
+  // Pre-fill the target yield with the comparables' median yield (once,
+  // if the user hasn't typed one yet).
+  const yEl=document.getElementById('subject-yield');
+  const compYields=sel.map(p=>p.initialYield).filter(v=>v!=null&&v>0);
+  if(yEl&&!yEl.value&&compYields.length){
+    yEl.value=(Math.round(median(compYields)*10)/10);
+  }
+
+  // Income-based valuation: value = annual rent ÷ (yield/100). When both
+  // a subject rent and a target yield are present, this OVERRIDES the
+  // $/m² estimate as the final figure; otherwise $/m² is used.
+  const rent=parseCurrency(document.getElementById('subject-rent')?.value);
+  const yld=parseFloat(yEl?.value)||0;
+  const rnd=v=>Math.round(v/1000)*1000;  // nearest $1,000
+  const impliedEl=document.getElementById('yield-implied');
+
+  if(rent>0&&yld>0){
+    const incomeVal=rent/(yld/100);
+    document.getElementById('est-low').value=fmtCurrencyInput(rnd(incomeVal*0.95));
+    document.getElementById('est-high').value=fmtCurrencyInput(rnd(incomeVal*1.05));
+    if(impliedEl)impliedEl.textContent='→ '+fmtCurrencyInput(rnd(incomeVal))+' at '+yld+'% (income-based)';
+  }else{
+    // Fall back to the $/m² method.
+    const est=adj*sqm;
+    document.getElementById('est-low').value=est?fmtCurrencyInput(rnd(est*0.95)):'';
+    document.getElementById('est-high').value=est?fmtCurrencyInput(rnd(est*1.05)):'';
+    if(impliedEl){
+      // Show the yield the $/m² estimate would imply, as a sense-check.
+      if(rent>0&&est>0){impliedEl.textContent='$/m² estimate implies '+(Math.round((rent/est)*1000)/10)+'% yield';}
+      else{impliedEl.textContent='';}
+    }
+  }
   updateEstLabels();
+}
+function onRentInput(el){
+  const n=parseCurrency(el.value);
+  el.value=n?fmtCurrencyInput(n):'';
+  recalcVal();
 }
 function parseCurrency(v){const n=Number(String(v||'').replace(/[^\d.]/g,''));return isNaN(n)?0:n;}
 function fmtCurrencyInput(n){return n?'$'+Math.round(n).toLocaleString('en-NZ'):'';}
@@ -1941,7 +1988,9 @@ async function exportPDF(){
   const loc=parseFloat(document.getElementById('adj-loc')?.value)||0;
   const adj=medVal*(1+size/100)*(1+age/100)*(1+loc/100);
   const subSqm=parseFloat(document.getElementById('subject-sqm')?.value)||0;
-
+  const subRent=parseCurrency(document.getElementById('subject-rent')?.value)||0;
+  const subYield=parseFloat(document.getElementById('subject-yield')?.value)||0;
+  const incomeBased=(subRent>0&&subYield>0);
   const prices=sel.map(p=>p.salePrice).filter(v=>v>0).sort((a,b)=>a-b);
   const sqms=sel.map(p=>p.sqm).filter(v=>v>0);
   const psms=sel.map(p=>p.pricePerSqm).filter(v=>v>0).sort((a,b)=>a-b);
@@ -1957,6 +2006,9 @@ async function exportPDF(){
     estimated_high:parseCurrency(document.getElementById('est-high')?.value)||null,
     adjusted_psm:Math.round(adj)||null,
     adjustments:{size,age,location:loc},
+    subject_rent:subRent||null,
+    subject_yield:subYield||null,
+    valuation_basis:incomeBased?'income':'psm',
     gmaps_key:gmapsKey||'',
     stats:{
       count:sel.length,
