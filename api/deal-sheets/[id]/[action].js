@@ -13,6 +13,7 @@ import { supabase } from "../../_lib/supabase.js";
 import { computeDerived, validateForSubmit } from "../../_lib/deals.js";
 import { notifyAccounts } from "../../_lib/graph.js";
 import { pushToPropCMA } from "../../_lib/propcma.js";
+import { appendToExcel } from "../../_lib/excel.js";
 
 export default async function handler(req, res) {
   try {
@@ -147,7 +148,26 @@ async function invoice(req, res, deal) {
       .update({ propcma_property_id: pushed.id }).eq("id", deal.id);
   }
 
-  return res.status(200).json({ ok: true, status: "invoiced", propcma: pushed });
+  // Also append the sale to the Sales Data Colliers.xlsx workbook.
+  // Reuses the same ds_ id and broker names so Excel and Supabase match.
+  // Non-fatal for the same reason; recorded in the audit trail.
+  let excelResult = { ok: false, skipped: true };
+  if (pushed.ok) {
+    const { data: brokerRows } = await supabase.from("brokers").select("code, first_name");
+    const brokerNames = Object.fromEntries((brokerRows || []).map((b) => [b.code, b.first_name]));
+    excelResult = await appendToExcel(updated, pushed.id, brokerNames);
+    await supabase.from("deal_sheet_events").insert({
+      deal_id: deal.id,
+      actor: user.oid,
+      from_status: "invoiced",
+      to_status: "invoiced",
+      note: excelResult.ok
+        ? `Added to Sales Data Colliers.xlsx (row ${excelResult.row})`
+        : `Excel write FAILED — needs manual entry: ${excelResult.error}`,
+    });
+  }
+
+  return res.status(200).json({ ok: true, status: "invoiced", propcma: pushed, excel: excelResult });
 }
 
 // ---------- accounts: return to broker with a reason ----------
