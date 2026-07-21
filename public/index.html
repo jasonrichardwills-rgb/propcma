@@ -151,6 +151,34 @@ input[type=checkbox]{cursor:pointer;accent-color:var(--cb);}
 .slideover-sub{font-size:11px;color:rgba(255,255,255,.5);margin-top:3px;}
 .slideover-close{background:none;border:none;color:rgba(255,255,255,.6);font-size:20px;cursor:pointer;padding:0;line-height:1;flex-shrink:0;}
 .slideover-close:hover{color:#fff;}
+/* Property summary modal (item 3) */
+.psum-backdrop{position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:300;opacity:0;pointer-events:none;transition:opacity .2s;display:flex;align-items:center;justify-content:center;padding:24px;}
+.psum-backdrop.open{opacity:1;pointer-events:all;}
+.psum{background:#fff;border-radius:10px;max-width:760px;width:100%;max-height:90vh;overflow-y:auto;box-shadow:0 20px 60px rgba(0,0,0,.3);}
+.psum-head{padding:18px 22px;border-bottom:3px solid var(--cb);background:var(--cb-deeper);display:flex;align-items:flex-start;justify-content:space-between;position:sticky;top:0;z-index:2;}
+.psum-title{font-size:16px;font-weight:600;color:#fff;}
+.psum-sub{font-size:11px;color:rgba(255,255,255,.55);margin-top:3px;}
+.psum-close{background:none;border:none;color:rgba(255,255,255,.7);font-size:22px;cursor:pointer;line-height:1;padding:0;}
+.psum-close:hover{color:#fff;}
+.psum-body{padding:22px;}
+.psum-photo{width:100%;max-width:480px;height:auto;aspect-ratio:3/2;object-fit:cover;border-radius:8px;border:var(--border);display:block;margin:0 auto 20px;background:var(--paper2);}
+.psum-photo-ph{width:100%;max-width:480px;aspect-ratio:3/2;border-radius:8px;border:var(--border);background:var(--paper2);display:flex;align-items:center;justify-content:center;color:var(--ink3);font-size:40px;margin:0 auto 20px;}
+.psum-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:14px 28px;}
+.psum-field{display:flex;flex-direction:column;gap:2px;}
+.psum-field.full{grid-column:1/-1;}
+.psum-flabel{font-size:10px;text-transform:uppercase;letter-spacing:.06em;color:var(--ink3);font-weight:700;}
+.psum-fval{font-size:14px;color:var(--ink);}
+.psum-notes{white-space:pre-wrap;font-size:13px;line-height:1.5;color:var(--ink2);}
+.psum-actions{padding:16px 22px;border-top:1px solid var(--paper2);display:flex;justify-content:flex-end;gap:10px;position:sticky;bottom:0;background:#fff;}
+@media print{
+  body>*{display:none!important;}
+  .psum-backdrop{position:static!important;display:block!important;opacity:1!important;padding:0!important;background:#fff!important;}
+  .psum-backdrop.printing{display:block!important;}
+  .psum{box-shadow:none!important;max-height:none!important;max-width:100%!important;}
+  .psum-head{background:#0a3d2e!important;-webkit-print-color-adjust:exact;print-color-adjust:exact;}
+  .psum-close,.psum-actions{display:none!important;}
+}
+
 .slideover-body{flex:1;overflow-y:auto;padding:20px;}
 .slideover-footer{padding:14px 20px;border-top:var(--border);background:var(--paper);display:flex;gap:8px;align-items:center;flex-shrink:0;}
 .edit-section-title{font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:var(--cb);font-weight:700;margin:18px 0 10px;border-bottom:2px solid var(--cb-light);padding-bottom:4px;}
@@ -255,6 +283,13 @@ input[type=checkbox]{cursor:pointer;accent-color:var(--cb);}
         </div>
       </div>
       <div class="sidebar-section">
+        <div class="sidebar-label">Net Yield (%)</div>
+        <div class="range-pair">
+          <input type="text" id="f-yield-min" placeholder="Min" oninput="applyFilters()">
+          <input type="text" id="f-yield-max" placeholder="Max" oninput="applyFilters()">
+        </div>
+      </div>
+      <div class="sidebar-section">
         <div class="sidebar-label">Date Range</div>
         <div style="display:flex;flex-direction:column;gap:5px;">
           <input type="text" id="f-date-from" placeholder="DD/MM/YYYY or YYYY" oninput="applyFilters()">
@@ -301,7 +336,7 @@ input[type=checkbox]{cursor:pointer;accent-color:var(--cb);}
             <th data-col="category">Type <i class="ti ti-arrows-sort sort-icon" aria-hidden="true"></i></th>
             <th data-col="leaseOrSale">L/S <i class="ti ti-arrows-sort sort-icon" aria-hidden="true"></i></th>
             <th data-col="auction">Auction <i class="ti ti-arrows-sort sort-icon" aria-hidden="true"></i></th>
-            <th data-col="sqm">Land Area SQM <i class="ti ti-arrows-sort sort-icon" aria-hidden="true"></i></th>
+            <th data-col="sqm">Building SQM <i class="ti ti-arrows-sort sort-icon" aria-hidden="true"></i></th>
             <th data-col="pricePerSqm">$/m² <i class="ti ti-arrows-sort sort-icon" aria-hidden="true"></i></th>
             <th data-col="salePrice">Price <i class="ti ti-arrows-sort sort-icon" aria-hidden="true"></i></th>
             <th data-col="broker">Broker <i class="ti ti-arrows-sort sort-icon" aria-hidden="true"></i></th>
@@ -433,10 +468,10 @@ input[type=checkbox]{cursor:pointer;accent-color:var(--cb);}
                 <thead><tr style="border-bottom:2px solid var(--cb);">
                   <th style="padding:6px 8px;text-align:left;font-size:10px;text-transform:uppercase;letter-spacing:.06em;color:#000;font-weight:700;">Address</th>
                   <th style="padding:6px 8px;text-align:left;font-size:10px;text-transform:uppercase;letter-spacing:.06em;color:#000;font-weight:700;">Date</th>
-                  <th style="padding:6px 8px;text-align:right;font-size:10px;text-transform:uppercase;letter-spacing:.06em;color:#000;font-weight:700;">Land SQM</th>
+                  <th style="padding:6px 8px;text-align:right;font-size:10px;text-transform:uppercase;letter-spacing:.06em;color:#000;font-weight:700;">Building SQM</th>
                   <th style="padding:6px 8px;text-align:right;font-size:10px;text-transform:uppercase;letter-spacing:.06em;color:#000;font-weight:700;">Price</th>
                   <th style="padding:6px 8px;text-align:right;font-size:10px;text-transform:uppercase;letter-spacing:.06em;color:#000;font-weight:700;">$/m²</th>
-                  <th style="padding:6px 8px;text-align:left;font-size:10px;text-transform:uppercase;letter-spacing:.06em;color:#000;font-weight:700;">Broker</th>
+                  <th style="padding:6px 8px;text-align:right;font-size:10px;text-transform:uppercase;letter-spacing:.06em;color:#000;font-weight:700;">Net Yield %</th>
                 </tr></thead>
                 <tbody id="report-comps-body"></tbody>
               </table>
@@ -758,10 +793,11 @@ function hydrateGraphThumbs(){
     }
   });
 }
-function addrLink(address){
+function addrLink(address,id){
   if(!address||address==='—')return '—';
   const display=address.length>40?address.slice(0,40)+'…':address;
-  return `<a class="addr-link" href="${mapsUrl(address)}" target="_blank" rel="noopener" onclick="event.stopPropagation()"><i class="ti ti-map-pin" aria-hidden="true"></i>${display}</a>`;
+  // Item 3: address opens the property summary modal (photo now links to Maps).
+  return `<a class="addr-link" href="#" onclick="event.stopPropagation();event.preventDefault();openPropSummary('${(id||'').replace(/'/g,"\\'")}')"><i class="ti ti-info-circle" aria-hidden="true"></i>${display}</a>`;
 }
 function reportAddrLink(address){
   if(!address)return '—';
@@ -1645,6 +1681,7 @@ function applyFilters(){
   const sqmMin=parseFloat(document.getElementById('f-sqm-min').value)||0,sqmMax=parseFloat(document.getElementById('f-sqm-max').value)||Infinity;
   const pMin=parseFloat(document.getElementById('f-price-min').value)||0,pMax=parseFloat(document.getElementById('f-price-max').value)||Infinity;
   const psmMin=parseFloat(document.getElementById('f-psm-min').value)||0,psmMax=parseFloat(document.getElementById('f-psm-max').value)||Infinity;
+  const yldMin=parseFloat(document.getElementById('f-yield-min').value)||0,yldMax=parseFloat(document.getElementById('f-yield-max').value)||Infinity;
   const fs=document.getElementById('f-date-from').value.trim(),ts=document.getElementById('f-date-to').value.trim();
   const fromTs=fs?parseDate(fs):null;let toTsEnd=ts?parseDate(ts):null;
   if(toTsEnd!==null){
@@ -1670,6 +1707,7 @@ function applyFilters(){
     if(p.sqm!=null&&(p.sqm<sqmMin||p.sqm>sqmMax))return false;
     if(p.salePrice!=null&&(p.salePrice<pMin||p.salePrice>pMax))return false;
     if(p.pricePerSqm!=null&&(p.pricePerSqm<psmMin||p.pricePerSqm>psmMax))return false;
+    if((yldMin>0||yldMax<Infinity)&&(p.initialYield==null||p.initialYield<yldMin||p.initialYield>yldMax))return false;
     if(fromTs!=null&&(p.saleDateTs==null||p.saleDateTs<fromTs))return false;
     if(toTsEnd!=null&&(p.saleDateTs==null||p.saleDateTs>toTsEnd))return false;
     return true;
@@ -1729,8 +1767,8 @@ function renderTable(){
     const catPill=(p.category||'').toLowerCase()==='investment'?'pill-investment':'';
     return `<tr class="${sc}" onclick="toggleRow('${p.id}',event)">
       <td><input type="checkbox" ${chk} onclick="toggleRow('${p.id}',event)"></td>
-      <td class="sv-cell" onclick="event.stopPropagation()">${propThumb(p)}</td>
-      <td>${addrLink(p.address)}</td>
+      <td class="sv-cell" onclick="event.stopPropagation()">${p.address?`<a href="${mapsUrl(p.address)}" target="_blank" rel="noopener" title="Open in Google Maps" style="display:block;cursor:pointer;">${propThumb(p)}</a>`:propThumb(p)}</td>
+      <td>${addrLink(p.address,p.id)}</td>
       <td>${p.saleDate||'—'}</td>
       <td>${catPill?'<span class="pill '+catPill+'">'+p.category+'</span>':(p.category||'—')}</td>
       <td><span class="pill ${lsp}">${p.leaseOrSale||'—'}</span></td>
@@ -1800,8 +1838,8 @@ function buildReport(){
     <td style="padding:6px 8px;text-align:right;">${fmtNum(p.sqm)||'—'}</td>
     <td style="padding:6px 8px;text-align:right;">${p.salePrice?'$'+fmtPrice(p.salePrice):'—'}</td>
     <td style="padding:6px 8px;text-align:right;">${p.pricePerSqm?'$'+fmtNum(Math.round(p.pricePerSqm)):'—'}</td>
-    <td style="padding:6px 8px;">${p.broker||'—'}</td>
-  </tr>`).join('');
+    <td style="padding:6px 8px;text-align:right;">${p.initialYield!=null?p.initialYield+'%':'—'}</td>
+  </tr>${(p.notes||'').trim()?`<tr style="background:${i%2===0?'var(--paper2)':'#fff'};"><td colspan="6" style="padding:0 8px 8px;"><span style="font-size:9px;text-transform:uppercase;letter-spacing:.06em;color:var(--ink3);font-weight:700;">Notes</span><div style="font-size:10px;line-height:1.4;color:var(--ink2);display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden;max-height:calc(1.4em * 3);">${(p.notes||'').replace(/</g,'&lt;')}</div></td></tr>`:''}`).join('');
   recalcVal();
 }
 function recalcVal(){
@@ -1941,6 +1979,7 @@ async function exportPDF(){
       broker:p.broker||'',
       initial_yield:p.initialYield||null,
       annual_rent:p.annualRent||null,
+      notes:p.notes||'',
     })),
   };
 
@@ -2093,6 +2132,68 @@ function openEdit(propId,event){
   document.body.style.overflow='hidden';
 }
 
+// ---- Property summary modal (items 2,3,5) ----
+function _psumPhotoHtml(p){
+  const ph=firstPhoto(p);
+  if(ph){
+    if(ph.startsWith('graph://'))
+      return `<img class="psum-photo" data-gref="${ph.replace(/"/g,'&quot;')}" alt="Property photo" onerror="this.outerHTML='<div class=&quot;psum-photo-ph&quot;><i class=&quot;ti ti-photo-off&quot;></i></div>'">`;
+    if(/^https?:\/\//.test(ph))
+      return `<img class="psum-photo" src="${ph.replace(/"/g,'&quot;')}" alt="Property photo" onerror="this.outerHTML='<div class=&quot;psum-photo-ph&quot;><i class=&quot;ti ti-photo-off&quot;></i></div>'">`;
+  }
+  // fall back to Street View at larger size if we have an address + key
+  const sv=streetViewUrl(p.address);
+  if(sv)return `<img class="psum-photo" src="${sv.replace('size=120x80','size=640x426')}" alt="Street view" onerror="this.outerHTML='<div class=&quot;psum-photo-ph&quot;><i class=&quot;ti ti-photo-off&quot;></i></div>'">`;
+  return '<div class="psum-photo-ph"><i class="ti ti-photo-off"></i></div>';
+}
+function _psumField(label,val,full){
+  return `<div class="psum-field${full?' full':''}"><span class="psum-flabel">${label}</span><span class="psum-fval">${val==null||val===''?'—':val}</span></div>`;
+}
+function openPropSummary(id){
+  const p=allProperties.find(x=>x.id===id);
+  if(!p)return;
+  document.getElementById('psum-title').textContent=p.address||'Property';
+  document.getElementById('psum-sub').textContent=[p.category,p.leaseOrSale].filter(Boolean).join(' · ');
+  const money=v=>v!=null&&v!==''?'$'+fmtPrice(v):'—';
+  const yld=p.initialYield!=null?p.initialYield+'%':'—';
+  const notes=(p.notes||'').trim();
+  document.getElementById('psum-body').innerHTML=
+    _psumPhotoHtml(p)+
+    '<div class="psum-grid">'+
+      _psumField('Address',p.address,true)+
+      _psumField('Date Sold',p.saleDate)+
+      _psumField('Category',p.category)+
+      _psumField('Lease / Sale',p.leaseOrSale)+
+      _psumField('Auction',p.auction?'Yes':'No')+
+      _psumField('Building SQM',fmtNum(p.sqm))+
+      _psumField('Land Area SQM',fmtNum(p.landArea))+
+      _psumField('Sale Price',money(p.salePrice))+
+      _psumField('Price per SQM',p.pricePerSqm?'$'+fmtNum(Math.round(p.pricePerSqm)):'—')+
+      _psumField('Annual Rent',money(p.annualRent))+
+      _psumField('Net Yield %',yld)+
+      _psumField('WALE (Years)',p.wale!=null?p.wale:'—')+
+      _psumField('Vendor / Landlord',p.vendor)+
+      _psumField('Purchaser / Tenant',p.purchaser)+
+      _psumField('Broker',p.broker)+
+      _psumField('Notes','<span class="psum-notes">'+(notes?notes.replace(/</g,'&lt;'):'—')+'</span>',true)+
+    '</div>';
+  document.getElementById('psum-backdrop').classList.add('open');
+  document.body.style.overflow='hidden';
+  // resolve any graph:// photo in the modal
+  if(typeof hydrateGraphThumbs==='function')setTimeout(hydrateGraphThumbs,30);
+}
+function closePropSummary(){
+  document.getElementById('psum-backdrop').classList.remove('open');
+  document.body.style.overflow='';
+}
+function printPropSummary(){
+  const bd=document.getElementById('psum-backdrop');
+  bd.classList.add('printing');
+  window.print();
+  setTimeout(()=>bd.classList.remove('printing'),500);
+}
+document.addEventListener('keydown',e=>{if(e.key==='Escape')closePropSummary();});
+
 function closeEdit(){
   editingPropId=null;
   document.getElementById('so-backdrop').classList.remove('open');
@@ -2206,5 +2307,21 @@ async function saveEdit(){
 
 init();
 </script>
+
+  <!-- Property summary modal (item 3) -->
+  <div class="psum-backdrop" id="psum-backdrop" onclick="if(event.target===this)closePropSummary()">
+    <div class="psum" id="psum-panel" role="dialog" aria-modal="true">
+      <div class="psum-head">
+        <div><div class="psum-title" id="psum-title">Property</div>
+          <div class="psum-sub" id="psum-sub"></div></div>
+        <button class="psum-close" onclick="closePropSummary()" aria-label="Close">&times;</button>
+      </div>
+      <div class="psum-body" id="psum-body"></div>
+      <div class="psum-actions">
+        <button class="btn" onclick="closePropSummary()">Close</button>
+        <button class="btn btn-primary" onclick="printPropSummary()"><i class="ti ti-printer" aria-hidden="true"></i> Print to PDF</button>
+      </div>
+    </div>
+  </div>
 </body>
 </html>
