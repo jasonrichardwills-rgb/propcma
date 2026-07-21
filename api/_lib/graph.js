@@ -8,7 +8,7 @@
 //     -PolicyScopeGroupId dealsheets@sicommercial.co.nz `
 //     -AccessRight RestrictAccess
 
-async function graphToken() {
+export async function graphToken() {
   const res = await fetch(
     `https://login.microsoftonline.com/${process.env.MS_TENANT_ID}/oauth2/v2.0/token`,
     {

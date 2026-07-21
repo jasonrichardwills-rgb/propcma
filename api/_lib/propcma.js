@@ -41,7 +41,11 @@ export function toPropertyRow(deal, newId, brokerNames = {}) {
     ? num(sale.yieldManual)
     : (salePrice && annualRent ? +((annualRent / salePrice) * 100).toFixed(2) : null);
 
-  // Brokers: full first names, comma separated.
+  // Category comes from the Division dropdown (a controlled list),
+  // not the free-text property type. "Investment Sales" is recorded
+  // as "Investment" in PropCMA.
+  const divisionToCategory = (div) =>
+    div === "Investment Sales" ? "Investment" : (div || null);
   const brokers = (form.ownership?.salespeople || [])
     .map((code) => brokerNames[code] || code)
     .join(", ");
@@ -59,7 +63,7 @@ export function toPropertyRow(deal, newId, brokerNames = {}) {
     sale_date_ts: Number.isFinite(saleDateTs) ? saleDateTs : null,
     lease_or_sale: "Sale",          // deal sheet is the Sales Record
     auction: !!sale.auction,        // boolean column
-    category: form.property?.propertyType || null,
+    category: divisionToCategory(form.ownership?.division),
     sqm: sqm,
     sale_price: salePrice,
     price_per_sqm: salePrice && sqm ? +(salePrice / sqm).toFixed(2) : null,
