@@ -1533,11 +1533,34 @@ async function writePropertyToExcel(prop){
       headers=newHeaders;
     }
 
-    // Row number from prop id: xl_N → N (row N in the spreadsheet, 1-based, row 1 = header)
-    const rowNum=parseInt((prop.id||'').replace('xl_',''));
-    if(isNaN(rowNum)||rowNum<2){
-      console.warn('Excel write: no valid row number for prop id',prop.id);
-      lastExcelWriteError='no spreadsheet row for this record ('+prop.id+') — likely added outside the sheet';
+    // Locate the spreadsheet row for this record.
+    //
+    // Legacy `xl_N` ids encode the row number directly (xl_2437 = row 2437).
+    // Records created by the Deal Sheet app use `ds_N`, where N is a
+    // sequence number that has NO relationship to the row it landed on —
+    // so for those we look the id up in column A.
+    let rowNum = NaN;
+    const pid = String(prop.id || '');
+    if (/^xl_\d+$/.test(pid)) {
+      rowNum = parseInt(pid.replace('xl_', ''), 10);
+    } else {
+      // Search column A for the id.
+      step = 'locate row for ' + pid;
+      try {
+        const colA = await graphRetry(() => graphGet(
+          `/drives/${cfg._driveId}/items/${cfg._itemId}/workbook/worksheets/${encodeURIComponent(sn)}/range(address='A1:A100000')?$select=values`
+        ));
+        const vals = (colA.values || []).map(r => String((r && r[0]) ?? '').trim());
+        const idx = vals.findIndex(v => v === pid);
+        if (idx >= 0) rowNum = idx + 1;          // values are 0-based, rows 1-based
+      } catch (e) {
+        console.warn('Excel row lookup failed:', e.message);
+      }
+    }
+
+    if (isNaN(rowNum) || rowNum < 2) {
+      console.warn('Excel write: could not locate a row for prop id', prop.id);
+      lastExcelWriteError = 'could not find a spreadsheet row for this record (' + prop.id + ')';
       document.getElementById('so-sheets-status').style.display='';
       return false;
     }
