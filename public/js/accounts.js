@@ -46,14 +46,28 @@
 
   function checklistOf(deal) {
     const c = (deal.form && deal.form.checklist) || {};
-    const items = [
-      ["agencyAgreement", "Signed agency agreement"],
-      ["unconditionalConfirmation", "Confirmation of unconditional"],
-      ["salePriceConfirmation", "Confirmation of sale price"],
-      ["marketingReport", "Marketing campaign report"],
-      ["amlComplete", "AML complete"],
-    ];
-    if (deal.deposit_to_trust) items.push(["spAgreement", "S&P agreement (trust deal)"]);
+    const isLease = deal.deal_type === "lease";
+    const items = isLease
+      ? [
+          ["agencyAgreement", "Signed agency agreement"],
+          ["unconditionalConfirmation", "Confirmation of unconditional"],
+          ["leaseValueConfirmation", "Confirmation of lease value"],
+          ["marketingReport", "Marketing campaign report"],
+          ["amlComplete", "AML complete"],
+          ["leaseDeed", "Lease deed"],
+        ]
+      : [
+          ["agencyAgreement", "Signed agency agreement"],
+          ["unconditionalConfirmation", "Confirmation of unconditional"],
+          ["salePriceConfirmation", "Confirmation of sale price"],
+          ["marketingReport", "Marketing campaign report"],
+          ["amlComplete", "AML complete"],
+        ];
+    if (deal.deposit_to_trust) {
+      items.push(isLease
+        ? ["appraisals", "Appraisals (trust deal)"]
+        : ["spAgreement", "S&P agreement (trust deal)"]);
+    }
     return items.map(([k, label]) => ({ ok: !!c[k], label }));
   }
 
@@ -238,10 +252,19 @@
         <section class="panel">
           <h3>Deal</h3>
           <dl>
-            <div><dt>Vendor</dt><dd>${esc(d.vendor_name||"—")}</dd></div>
-            <div><dt>Purchaser</dt><dd>${esc(d.purchaser_name||"—")}</dd></div>
-            <div><dt>Unconditional</dt><dd>${esc(d.unconditional_date||"—")}</dd></div>
+            <div><dt>${d.deal_type === "lease" ? "Lessor" : "Vendor"}</dt><dd>${esc(d.vendor_name||"—")}</dd></div>
+            <div><dt>${d.deal_type === "lease" ? "Lessee" : "Purchaser"}</dt><dd>${esc(d.purchaser_name||"—")}</dd></div>
+            <div><dt>${d.deal_type === "lease" ? "Commencement" : "Unconditional"}</dt><dd>${esc(
+              d.deal_type === "lease"
+                ? (d.form?.lease?.commencementDate || d.unconditional_date || "—")
+                : (d.unconditional_date||"—"))}</dd></div>
+            ${d.deal_type === "lease" ? `
+            <div><dt>Lease term</dt><dd>${d.lease_term_years ? esc(d.lease_term_years) + " years" : "—"}</dd></div>
+            <div><dt>Net rental p.a.</dt><dd>$${fmt(d.annual_net_rent)}</dd></div>
+            <div><dt>Gross rental p.a. (excl GST)</dt><dd>$${fmt(d.annual_gross_rent || d.sale_price_ex_gst)}</dd></div>
+            ` : `
             <div><dt>Sale price (excl GST)</dt><dd>$${fmt(d.sale_price_ex_gst)}</dd></div>
+            `}
             <div class="hl"><dt>Total to invoice (excl GST)</dt><dd>$${fmt(d.total_invoice_ex_gst)}</dd></div>
           </dl>
           ${d.form && d.form.deposit && d.deposit_to_trust ? `<h3>Trust deposit</h3><dl>
