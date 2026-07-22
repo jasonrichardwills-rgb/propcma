@@ -819,6 +819,21 @@ function reportAddrLink(address){
 }
 
 // ── Date parsing ─────────────────────────────────────────────
+function displayDate(raw){
+  // Show a human date even when the stored value is an Excel serial
+  // number (legacy rows imported from the spreadsheet store dates that
+  // way, e.g. 46220 = 17 Jul 2026).
+  if(raw===null||raw===undefined||raw==='')return '—';
+  const s=String(raw).trim();
+  if(/^\d{5}$/.test(s)){                 // 5-digit Excel serial
+    const ts=parseDate(s);
+    if(ts!=null){
+      const d=new Date(ts);
+      return d.toLocaleDateString('en-NZ',{day:'2-digit',month:'short',year:'numeric'});
+    }
+  }
+  return s;
+}
 function parseDate(raw){
   if(!raw&&raw!==0)return null;
   // A 4-digit number in a plausible year range is a YEAR, not an Excel serial
@@ -1783,7 +1798,7 @@ function renderTable(){
       <td><input type="checkbox" ${chk} onclick="toggleRow('${p.id}',event)"></td>
       <td class="sv-cell" onclick="event.stopPropagation()">${p.address?`<a href="${mapsUrl(p.address)}" target="_blank" rel="noopener" title="Open in Google Maps" style="display:block;cursor:pointer;">${propThumb(p)}</a>`:propThumb(p)}</td>
       <td>${addrLink(p.address,p.id)}</td>
-      <td>${p.saleDate||'—'}</td>
+      <td>${displayDate(p.saleDate)}</td>
       <td>${catPill?'<span class="pill '+catPill+'">'+p.category+'</span>':(p.category||'—')}</td>
       <td><span class="pill ${lsp}">${p.leaseOrSale||'—'}</span></td>
       <td>${p.initialYield!=null?p.initialYield+'%':'—'}</td>
@@ -1848,7 +1863,7 @@ function buildReport(){
   document.getElementById('adj-base-r').textContent='$'+fmtNum(med);
   document.getElementById('report-comps-body').innerHTML=sel.map((p,i)=>`<tr style="border-bottom:1px solid var(--paper2);background:${i%2===0?'var(--paper2)':'#fff'};">
     <td style="padding:6px 8px;">${reportAddrLink(p.address)}</td>
-    <td style="padding:6px 8px;">${p.saleDate||'—'}</td>
+    <td style="padding:6px 8px;">${displayDate(p.saleDate)}</td>
     <td style="padding:6px 8px;text-align:right;">${fmtNum(p.sqm)||'—'}</td>
     <td style="padding:6px 8px;text-align:right;">${p.salePrice?'$'+fmtPrice(p.salePrice):'—'}</td>
     <td style="padding:6px 8px;text-align:right;">${p.pricePerSqm?'$'+fmtNum(Math.round(p.pricePerSqm)):'—'}</td>
