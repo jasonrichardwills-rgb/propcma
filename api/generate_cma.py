@@ -348,7 +348,7 @@ def draw_property_card(c, x, y, cw, ch, prop, api_key):
 
 
 # ── Comparable sales table (page 3+) ─────────────────────────
-from datetime import datetime
+from datetime import datetime, timedelta
 
 def fmt_full_date(s):
     """Format a sale date as 'Friday, 26 June 2026'. Falls back to raw string."""
@@ -493,6 +493,199 @@ def draw_property_row(c, y, row_h, prop, api_key):
     c.line(TBL_X, y, TBL_X + sum(TBL_COLS), y)
 
 
+# ── Comparable sales card pages (Claude Design layout) ───────
+ACCENT   = HexColor('#13233f')
+INK_DARK = HexColor('#0d1830')
+INK_BODY = HexColor('#1a2233')
+INK_MID  = HexColor('#475066')
+INK_SOFT = HexColor('#667085')
+INK_FAINT= HexColor('#8a93a3')
+CARD_BRD = HexColor('#dde1e8')
+RULE_SOFT= HexColor('#eef0f3')
+
+CARD_MX   = 42    # page side margin (56px design → pt)
+CARD_TOP  = 39    # top padding
+CARD_BOT  = 26    # bottom padding
+CARD_GAP  = 16.5  # grid gap
+
+def fmt_month_year(s):
+    """Short 'Jun 2026' from a sale date in many possible formats.
+    Falls back to a trimmed raw string (never a long overflowing one)."""
+    if not s: return '—'
+    s = str(s).strip()
+
+    # Excel date serial (days since 1899-12-30). Legacy spreadsheet rows
+    # store dates this way, e.g. 46223 -> 20 Jul 2026.
+    if s.isdigit() and 4 <= len(s) <= 5:
+        n = int(s)
+        if 20000 <= n <= 80000:          # ~1954 to ~2119: a plausible date
+            try:
+                return (datetime(1899, 12, 30) + timedelta(days=n)).strftime('%b %Y')
+            except (ValueError, OverflowError):
+                pass
+
+    fmts = (
+        '%A, %B %d, %Y',   # Friday, June 26, 2026
+        '%A %B %d, %Y', '%B %d, %Y', '%b %d, %Y',
+        '%d/%m/%Y', '%d-%m-%Y', '%d.%m.%Y', '%Y-%m-%d',
+        '%d %b %Y', '%d %B %Y', '%b %Y', '%B %Y',
+        '%m/%Y', '%m-%Y', '%Y/%m/%d',
+    )
+    for f in fmts:
+        try:
+            return datetime.strptime(s, f).strftime('%b %Y')  # e.g. 'Jun 2026'
+        except ValueError:
+            pass
+    # Last resort: try to pull a month name + year out of the string
+    import re as _re
+    m = _re.search(r'([A-Za-z]{3,9})\D+(\d{4})', s)
+    if m:
+        for f in ('%B', '%b'):
+            try:
+                mn = datetime.strptime(m.group(1)[:9], f)
+                return f'{mn.strftime("%b")} {m.group(2)}'
+            except ValueError:
+                pass
+    # Give up gracefully — return something short, not a long overflow.
+    return s[:8]
+
+def draw_sales_card(c, x, y, w, h, prop, api_key):
+    """One comparable-sales card. (x,y) = bottom-left."""
+    r = 4.5
+    # Card border
+    c.setStrokeColor(CARD_BRD)
+    c.setLineWidth(0.8)
+    c.setFillColor(WHITE)
+    c.roundRect(x, y, w, h, r, fill=1, stroke=1)
+
+    # ── Photo (16:9 across the top) ──
+    ph_h = w * 9/16
+    ph_y = y + h - ph_h
+    img = None
+    b64p = prop.get('photo_b64')
+    if b64p:
+        try:
+            import base64 as _b64
+            img = Image.open(io.BytesIO(_b64.b64decode(b64p))).convert('RGB')
+        except Exception:
+            img = None
+    if img is None:
+        img = fetch_streetview(prop.get('address',''), api_key, size='400x225')
+    c.saveState()
+    p = c.beginPath()
+    p.rect(x+0.4, ph_y, w-0.8, ph_h-0.4)
+    c.clipPath(p, stroke=0, fill=0)
+    if img:
+        tw, th = img.size
+        target = w / ph_h
+        if tw/th > target:
+            nw = int(th*target); left=(tw-nw)//2; img = img.crop((left,0,left+nw,th))
+        else:
+            nh = int(tw/target); top=(th-nh)//3; img = img.crop((0,top,tw,top+nh))
+        c.drawImage(pil_to_rl(img), x+0.4, ph_y, width=w-0.8, height=ph_h-0.4,
+                    preserveAspectRatio=False, mask='auto')
+    else:
+        c.setFillColor(LGREY)
+        c.rect(x+0.4, ph_y, w-0.8, ph_h-0.4, fill=1, stroke=0)
+        c.setFont('Helvetica', 7)
+        c.setFillColor(DGREY)
+        c.drawCentredString(x+w/2, ph_y+ph_h/2-3, 'No image')
+    c.restoreState()
+
+    # Badge: CATEGORY · SALE
+    cat = (prop.get('category') or '').upper()
+    ls  = (prop.get('lease_or_sale') or '').upper()
+    badge = ' · '.join([t for t in (cat, ls) if t])
+    if badge:
+        c.setFont('Helvetica-Bold', 7.5)
+        bw = c.stringWidth(badge, 'Helvetica-Bold', 7.5) + 15
+        bx, by = x+7.5, y+h-7.5-13
+        c.setFillColor(ACCENT)
+        c.roundRect(bx, by, bw, 13, 2.2, fill=1, stroke=0)
+        c.setFillColor(WHITE)
+        c.drawCentredString(bx+bw/2, by+3.8, badge)
+
+    # ── Body ──
+    pad = 12
+    ty = ph_y - 16
+    # Address
+    c.setFillColor(INK_DARK)
+    c.setFont('Helvetica-Bold', 11)
+    addr = prop.get('address') or '—'
+    while c.stringWidth(addr, 'Helvetica-Bold', 11) > w - pad*2 and len(addr) > 4:
+        addr = addr[:-2].rstrip() + '…'
+    c.drawString(x+pad, ty, addr)
+    # Price row — with a "SALE PRICE" label above it
+    ty -= 15
+    c.setFont('Helvetica', 6.8)
+    c.setFillColor(INK_FAINT)
+    c.drawString(x+pad, ty, 'SALE PRICE')
+    ty -= 20
+    c.setFont('Helvetica-Bold', 18)
+    c.setFillColor(INK_DARK)
+    price = fmt_price(prop.get('sale_price'))
+    c.drawString(x+pad, ty, price)
+    psm = prop.get('price_per_sqm')
+    if psm:
+        c.setFont('Helvetica', 9)
+        c.setFillColor(INK_SOFT)
+        c.drawString(x+pad + c.stringWidth(price,'Helvetica-Bold',18) + 10, ty+1, f'{fmt_psm(psm)} /m²')
+    # Stat row: Net yield | Floor area | Land area | Sale date
+    ty -= 14
+    stats = [
+        ('NET YIELD',  f"{prop['initial_yield']:.1f}%" if prop.get('initial_yield') else '—', ''),
+        ('FLOOR AREA', fmt_num(prop.get('land_area')) if prop.get('land_area') else '—', ' m²' if prop.get('land_area') else ''),
+        ('LAND AREA',  fmt_num(prop.get('sqm')) if prop.get('sqm') else '—', ' m²' if prop.get('sqm') else ''),
+        ('SALE DATE',  fmt_month_year(prop.get('sale_date')), ''),
+    ]
+    col_w = (w - pad*2) / 4
+    for i, (lbl, val, suffix) in enumerate(stats):
+        sx = x + pad + i*col_w
+        c.setFont('Helvetica', 6.5)
+        c.setFillColor(INK_FAINT)
+        c.drawString(sx, ty, lbl)
+        c.setFont('Helvetica-Bold', 8.5)
+        c.setFillColor(INK_BODY)
+        c.drawString(sx, ty-10, val)
+        if suffix:
+            c.setFont('Helvetica', 7)
+            c.setFillColor(INK_MID)
+            c.drawString(sx + c.stringWidth(val,'Helvetica-Bold',8.5)+1.5, ty-10, suffix)
+    ty -= 22
+    # Notes (only when present) — wrapped, clamped to fit the card
+    notes = (prop.get('notes') or '').strip()
+    if notes:
+        c.setStrokeColor(RULE_SOFT)
+        c.setLineWidth(0.6)
+        c.line(x+pad, ty, x+w-pad, ty)
+        ty -= 11
+        max_lines = max(0, int((ty - (y+9)) / 10) + 1)
+        lines = _wrap(c, notes, 'Helvetica', 8, w - pad*2, max_lines=max(1, max_lines))
+        c.setFont('Helvetica', 8)
+        c.setFillColor(INK_MID)
+        for ln in lines:
+            if ty < y + 8: break
+            c.drawString(x+pad, ty, ln)
+            ty -= 10
+
+def draw_card_page_header(c, page_idx, total_grid_pages):
+    # Use the same navy top bar as the other inner pages, then the
+    # section title beneath it (no "page X of Y" label).
+    header_bar(c, 'Comparable Sales')
+    top_y = H - 36            # below the navy bar
+    c.setFont('Helvetica-Bold', 21)
+    c.setFillColor(INK_DARK)
+    c.drawString(CARD_MX, top_y - 26, 'Comparable Sales')
+    c.setStrokeColor(ACCENT)
+    c.setLineWidth(1.5)
+    c.line(CARD_MX, top_y - 37, W - CARD_MX, top_y - 37)
+    return top_y - 37 - 19.5  # grid top
+
+def draw_card_page_footer(c, page_num, total_pages):
+    # Same navy footer bar as the other pages.
+    footer(c, page_num, total_pages)
+
+
 # ── Main report builder ───────────────────────────────────────
 
 def build_report(data, output_path):
@@ -514,8 +707,8 @@ def build_report(data, output_path):
     psm_high = round(est_high / subject_sqm) if (est_high and subject_sqm) else None
     adj_psm = data.get('adjusted_psm')
 
-    # Count pages: 1 cover + 1 summary + N table pages (8 rows per page)
-    per_page = 8
+    # Count pages: 1 cover + 1 summary + N card pages (2x2 = 4 per page)
+    per_page = 4
     grid_pages = max(1, -(-len(props) // per_page))  # ceiling div
     total_pages = 2 + grid_pages
 
@@ -623,12 +816,23 @@ def build_report(data, output_path):
         c.drawCentredString(right_cx, H/2 + 28, f'{fmt_price(est_low)} – {fmt_price(est_high)}')
         c.setFont('Helvetica', 12)
         c.setFillColor(NAVY)
-        if psm_low and psm_high:
-            c.drawCentredString(right_cx, H/2 + 2, f'at {fmt_psm(psm_low)} – {fmt_psm(psm_high)} /m²')
-        if subject_sqm:
-            c.setFont('Helvetica', 10)
-            c.setFillColor(DGREY)
-            c.drawCentredString(right_cx, H/2 - 18, f'× {fmt_num(subject_sqm)} m²  subject land area')
+        basis = data.get('valuation_basis', 'psm')
+        subj_rent = data.get('subject_rent')
+        subj_yield = data.get('subject_yield')
+        if basis == 'income' and subj_yield:
+            # Income-based: show the yield the value is capitalised at.
+            c.drawCentredString(right_cx, H/2 + 2, f'at {subj_yield:.2f}% net yield')
+            if subj_rent:
+                c.setFont('Helvetica', 10)
+                c.setFillColor(DGREY)
+                c.drawCentredString(right_cx, H/2 - 18, f'on {fmt_price(subj_rent)} annual rent  ·  income basis')
+        else:
+            if psm_low and psm_high:
+                c.drawCentredString(right_cx, H/2 + 2, f'at {fmt_psm(psm_low)} – {fmt_psm(psm_high)} /m²')
+            if subject_sqm:
+                c.setFont('Helvetica', 10)
+                c.setFillColor(DGREY)
+                c.drawCentredString(right_cx, H/2 - 18, f'× {fmt_num(subject_sqm)} m²  subject land area')
 
     # Footer on cover
     footer(c, 1, total_pages)
@@ -758,34 +962,25 @@ def build_report(data, output_path):
     footer(c, 2, total_pages)
     c.showPage()
 
-    # ── PAGES 3+: COMPARABLE SALES TABLE ─────────────────────
-    header_h = 52
+    # ── PAGES 3+: COMPARABLE SALES CARDS (2x2 grid) ──────────
     for pg_idx in range(grid_pages):
         page_num = pg_idx + 3
         page_props = props[pg_idx * per_page : (pg_idx+1) * per_page]
 
-        header_bar(c, f'Comparable Sales — page {pg_idx + 1}')
+        grid_top = draw_card_page_header(c, pg_idx, grid_pages)
+        footer_top = CARD_BOT + 12 + 10   # footer rule + clearance
 
-        # Section title
-        c.setFont('Helvetica-Bold', 14)
-        c.setFillColor(NAVY)
-        c.drawString(TBL_X, H - header_h - 18, 'Comparable Sales')
-        c.setStrokeColor(BLUE)
-        c.setLineWidth(1.5)
-        c.line(TBL_X, H - header_h - 24, W - TBL_X, H - header_h - 24)
+        card_w = (W - CARD_MX*2 - CARD_GAP) / 2
+        card_h = (grid_top - footer_top - CARD_GAP) / 2
 
-        # Column headers
-        hdr_y = H - header_h - 42
-        draw_table_header(c, hdr_y)
-
-        # Rows
-        table_top = hdr_y - 8
-        row_h = (table_top - 32) / per_page   # 32pt clearance above footer
         for i, prop in enumerate(page_props):
-            ry = table_top - (i + 1) * row_h
-            draw_property_row(c, ry, row_h, prop, api_key)
+            col = i % 2
+            row = i // 2
+            cx = CARD_MX + col * (card_w + CARD_GAP)
+            cy = grid_top - (row + 1) * card_h - row * CARD_GAP
+            draw_sales_card(c, cx, cy, card_w, card_h, prop, api_key)
 
-        footer(c, page_num, total_pages)
+        draw_card_page_footer(c, page_num, total_pages)
         c.showPage()
 
     c.save()

@@ -61,7 +61,19 @@
     const yieldCalc = salePrice > 0 && num(f.sale.rentalIncome) > 0 ? (num(f.sale.rentalIncome)/salePrice)*100 : 0;
     const yieldPct = f.sale.yieldManual !== "" ? num(f.sale.yieldManual) : yieldCalc;
 
-    const tierFees = f.comm.tiers.map((t,i) => { const base = i===0 && !t.base ? salePrice : num(t.base); return (num(t.pct)/100)*base; });
+    // Tiered commission: each tier's base auto-fills with whatever's
+    // left of the sale price after the tiers above it, unless the user
+    // has typed an explicit amount (which always wins). tierBases holds
+    // the effective base shown/used per tier.
+    const tierBases = [];
+    let remaining = salePrice;
+    f.comm.tiers.forEach((t, i) => {
+      const typed = t.base !== "" && t.base != null;
+      const base = typed ? num(t.base) : Math.max(remaining, 0);
+      tierBases[i] = base;
+      remaining -= base;
+    });
+    const tierFees = f.comm.tiers.map((t,i) => (num(t.pct)/100) * tierBases[i]);
     const adminFee = f.comm.adminFee ? 500 : 0;
     const totalInvoice = tierFees.reduce((a,b)=>a+b,0) + num(f.comm.otherFee) + adminFee
       + num(f.comm.recoverMarketing) + num(f.comm.recoverOther);
@@ -73,7 +85,7 @@
     const internalPctTotal = f.splits.reduce((a,s)=>a+num(s.pct),0);
     const internalOk = internalPctTotal === 0 || Math.abs(internalPctTotal-100) < 0.01;
 
-    return { salePrice, yieldCalc, yieldPct, tierFees, adminFee, totalInvoice,
+    return { salePrice, yieldCalc, yieldPct, tierFees, tierBases, adminFee, totalInvoice,
              commissionBase, thirdPartyPctTotal, thirdPartyTotal, internalPool,
              internalPctTotal, internalOk };
   }
@@ -165,11 +177,19 @@
     const missing = validate(d);
     const f = state.f;
 
-    const commRows = ["Commission","Second tier","Third tier"].map((label,i) => `<tr>
+    const commRows = ["Commission","Second tier","Third tier"].map((label,i) => {
+      const t = f.comm.tiers[i];
+      const typed = t.base !== "" && t.base != null;
+      // Show the typed amount, or the auto-calculated remainder for this
+      // tier (only when there's something left to allocate).
+      const shownBase = typed ? t.base
+        : (d.tierBases[i] > 0 ? fmt(d.tierBases[i]) : "");
+      return `<tr>
       <td>${label}</td>
-      <td><input class="cell" data-recalc data-path="comm.tiers.${i}.pct" value="${esc(f.comm.tiers[i].pct)}" placeholder="%" /></td>
-      <td><input class="cell" data-recalc data-path="comm.tiers.${i}.base" value="${esc(i===0 && !f.comm.tiers[i].base ? (d.salePrice?fmt(d.salePrice):"") : f.comm.tiers[i].base)}" placeholder="${i===0?"Sale price":"Amount"}" /></td>
-      <td class="r mono">${d.tierFees[i]?fmt(d.tierFees[i]):"—"}</td></tr>`).join("");
+      <td><input class="cell" data-recalc data-path="comm.tiers.${i}.pct" value="${esc(t.pct)}" placeholder="%" /></td>
+      <td><input class="cell" data-recalc data-path="comm.tiers.${i}.base" value="${esc(shownBase)}" placeholder="${i===0?"Sale price":"Remainder"}" /></td>
+      <td class="r mono">${d.tierFees[i]?fmt(d.tierFees[i]):"—"}</td></tr>`;
+    }).join("");
 
     // Section 9 split dropdowns offer only the brokers chosen in section 1
     const dealBrokers = BROKERS.filter((b) => f.ownership.salespeople.includes(b.code));
@@ -189,9 +209,12 @@
       <header class="top">
         <div class="brand"><span class="brandMark">SIC</span>
           <div><h1>Deal Sheet — Sales Record</h1><p>South Island Commercial (2004) Limited · Colliers</p></div></div>
-        <div class="accountsBox"><span class="tag">Completed by accounts</span>
+        <div style="text-align:right">
+          <a href="admin.html" class="linkBtn" style="display:inline-block;margin-bottom:8px">← All deal sheets</a>
+          <div class="accountsBox"><span class="tag">Completed by accounts</span>
           <div class="acctFields"><label><span>File No.</span><input disabled placeholder="—" /></label>
           <label><span>Deal No.</span><input disabled placeholder="—" /></label></div></div>
+        </div>
       </header>
       <p class="mandate">Complete <strong>all</strong> categories for commission to be paid promptly.
         Fields marked <em class="req">*</em> and the mandatory checklist must be complete before sending to accounts.</p>
@@ -513,8 +536,12 @@
       <h1>Deal sheet sent to accounts</h1>
       <p><strong>${esc(f.property.address||"—")}</strong> — sale price $${fmt(d.salePrice)}, total to invoice $${fmt(d.totalInvoice)} excl GST.</p>
       <p class="dim">Accounts will assign the File No. and Deal No., raise the invoice and process commission. You'll be copied on the confirmation.</p>
-      <button class="ghost" id="againBtn">Start a new deal sheet</button></div>`;
-    $("againBtn").onclick = () => location.reload();
+      <div class="doneBtns">
+        <button class="primary" id="adminBtn">Return to deal sheets</button>
+        <button class="ghost" id="againBtn">Start a new deal sheet</button>
+      </div></div>`;
+    $("againBtn").onclick = () => { location.href = "deal-sheet.html"; };
+    $("adminBtn").onclick = () => { location.href = "admin.html"; };
   }
 
   // ---------- boot ----------
