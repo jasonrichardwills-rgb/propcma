@@ -81,9 +81,13 @@ export function toExcelRow(deal, newId, brokerNames = {}) {
   ];
 }
 
-async function graphGet(url, token) {
+async function graphGet(url, token, step = "request") {
   const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
-  if (!res.ok) throw new Error(`Graph GET ${res.status}: ${await res.text()}`);
+  if (!res.ok) {
+    const body = await res.text();
+    // Include the step so a failure names which call broke, not just "Graph GET 500".
+    throw new Error(`Graph GET failed at [${step}] ${res.status}: ${body.slice(0, 300)}`);
+  }
   return res.json();
 }
 
@@ -99,45 +103,78 @@ export async function appendToExcel(deal, newId, brokerNames = {}) {
     //    site's default document library.
     const site = await graphGet(
       `https://graph.microsoft.com/v1.0/sites/${SP_HOST}:${SP_SITE_PATH}`,
-      token
+      token, "resolve site"
     );
     const drive = await graphGet(
       `https://graph.microsoft.com/v1.0/sites/${site.id}/drive`,
-      token
+      token, "resolve drive"
     );
     // Find the workbook by name at the drive root (search is more
     // tolerant of folders than a fixed path).
     const search = await graphGet(
       `https://graph.microsoft.com/v1.0/drives/${drive.id}/root/search(q='${encodeURIComponent(FILE_NAME)}')`,
-      token
+      token, "find workbook"
     );
-    const item = (search.value || []).find((f) => f.name === FILE_NAME);
-    if (!item) throw new Error(`File not found: ${FILE_NAME}`);
+    const matches = (search.value || []).filter((f) => f.name === FILE_NAME);
+    if (!matches.length) {
+      const seen = (search.value || []).map((f) => f.name).slice(0, 5).join(", ");
+      throw new Error(`Workbook "${FILE_NAME}" not found. Search returned: ${seen || "nothing"}`);
+    }
+    const item = matches[0];
+
+    // Confirm the worksheet exists and get its EXACT name. Graph returns an
+    // unhelpful 500 "generalException" if the sheet name doesn't match
+    // character-for-character (trailing spaces, different capitalisation),
+    // so resolve it here and fail with a message that actually explains it.
+    const sheets = await graphGet(
+      `https://graph.microsoft.com/v1.0/drives/${drive.id}/items/${item.id}/workbook/worksheets?$select=name`,
+      token, "list worksheets"
+    );
+    const names = (sheets.value || []).map((w) => w.name);
+    const sheetName =
+      names.find((n) => n === WORKSHEET) ||
+      names.find((n) => n.trim().toLowerCase() === WORKSHEET.trim().toLowerCase());
+    if (!sheetName) {
+      throw new Error(
+        `Worksheet "${WORKSHEET}" not found in ${FILE_NAME}. Sheets present: ${names.join(" | ")}`
+      );
+    }
 
     // 2. Find the current used range on the worksheet, so we know which
     //    row to write next.
+    // usedRange(valuesOnly=true) is far cheaper than the default on large
+    // sheets — the default can time out and surface as a 500.
     const used = await graphGet(
-      `https://graph.microsoft.com/v1.0/drives/${drive.id}/items/${item.id}/workbook/worksheets/${encodeURIComponent(WORKSHEET)}/usedRange?$select=address,rowCount`,
-      token
+      `https://graph.microsoft.com/v1.0/drives/${drive.id}/items/${item.id}/workbook/worksheets/${encodeURIComponent(sheetName)}/usedRange(valuesOnly=true)?$select=address`,
+      token, "read used range"
     );
-    // usedRange address looks like "Summary All Years!A1:U57" — the next
-    // free row is rowCount+1 (rowCount includes the header row).
-    const m = /!\D+\d+:\D+(\d+)/.exec(used.address || "");
-    const lastRow = m ? parseInt(m[1], 10) : 1;
+    // usedRange address looks like "Summary All Years!A1:U57", or
+    // "'Summary All Years'!A1:U57" when the sheet name contains spaces.
+    // Take the LAST row number in the address (the bottom-right cell).
+    const addr = used.address || "";
+    const m = /![A-Z]+\d+:[A-Z]+(\d+)\s*$/i.exec(addr);
+    if (!m) {
+      // Never guess here: defaulting to row 1 would overwrite real data.
+      throw new Error(`Could not read the last used row from address "${addr}"`);
+    }
+    const lastRow = parseInt(m[1], 10);
     const nextRow = lastRow + 1;
     const targetAddress = `A${nextRow}:U${nextRow}`;
 
     // 3. Write the row.
     const row = toExcelRow(deal, newId, brokerNames);
     const res = await fetch(
-      `https://graph.microsoft.com/v1.0/drives/${drive.id}/items/${item.id}/workbook/worksheets/${encodeURIComponent(WORKSHEET)}/range(address='${encodeURIComponent(targetAddress)}')`,
+      `https://graph.microsoft.com/v1.0/drives/${drive.id}/items/${item.id}/workbook/worksheets/${encodeURIComponent(sheetName)}/range(address='${encodeURIComponent(targetAddress)}')`,
       {
         method: "PATCH",
         headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
         body: JSON.stringify({ values: [row] }),
       }
     );
-    if (!res.ok) throw new Error(`Excel write ${res.status}: ${await res.text()}`);
+    if (!res.ok) {
+      const body = await res.text();
+      throw new Error(`Excel write to ${targetAddress} failed ${res.status}: ${body.slice(0, 300)}`);
+    }
 
     console.log("Excel append ok", { dealId: deal.id, row: nextRow });
     return { ok: true, row: nextRow };
