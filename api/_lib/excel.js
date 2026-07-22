@@ -18,6 +18,9 @@ import { graphToken } from "./graph.js";
 const SP_HOST = "cjch.sharepoint.com";
 const SP_SITE_PATH = "/sites/BrokerToolKit";
 const FILE_NAME = "Sales Data Colliers.xlsx";
+// From the SharePoint URL: ...sourcedoc={7F7A269A-2F6D-4F97-9575-1DEAA100EFBB}
+// A stable id for the file that survives renames/moves.
+const FILE_GUID = "7F7A269A-2F6D-4F97-9575-1DEAA100EFBB";
 const WORKSHEET = "Summary All Years";
 
 const num = (v) => {
@@ -109,18 +112,77 @@ export async function appendToExcel(deal, newId, brokerNames = {}) {
       `https://graph.microsoft.com/v1.0/sites/${site.id}/drive`,
       token, "resolve drive"
     );
-    // Find the workbook by name at the drive root (search is more
-    // tolerant of folders than a fixed path).
-    const search = await graphGet(
-      `https://graph.microsoft.com/v1.0/drives/${drive.id}/root/search(q='${encodeURIComponent(FILE_NAME)}')`,
-      token, "find workbook"
-    );
-    const matches = (search.value || []).filter((f) => f.name === FILE_NAME);
-    if (!matches.length) {
-      const seen = (search.value || []).map((f) => f.name).slice(0, 5).join(", ");
-      throw new Error(`Workbook "${FILE_NAME}" not found. Search returned: ${seen || "nothing"}`);
+    // Find the workbook WITHOUT using /search — SharePoint's search
+    // endpoint returns intermittent 500s (it depends on the search index
+    // and behaves badly under Sites.Selected). Three strategies, cheapest
+    // and most reliable first.
+    let item = null;
+    const attempts = [];
+
+    // (a) By the document GUID from the SharePoint URL (sourcedoc=...).
+    //     This is stable across renames and moves.
+    if (FILE_GUID) {
+      try {
+        const byId = await graphGet(
+          `https://graph.microsoft.com/v1.0/sites/${site.id}/drive/items/${FILE_GUID}?$select=id,name`,
+          token, "find workbook by id"
+        );
+        if (byId && byId.id) item = byId;
+      } catch (e) { attempts.push(`by-guid: ${e.message.slice(0, 120)}`); }
     }
-    const item = matches[0];
+
+    // (b) By path at the library root.
+    if (!item) {
+      try {
+        const byPath = await graphGet(
+          `https://graph.microsoft.com/v1.0/drives/${drive.id}/root:/${encodeURIComponent(FILE_NAME)}?$select=id,name`,
+          token, "find workbook by path"
+        );
+        if (byPath && byPath.id) item = byPath;
+      } catch (e) { attempts.push(`by-path: ${e.message.slice(0, 120)}`); }
+    }
+
+    // (c) List the root children and match the name (no search index).
+    if (!item) {
+      try {
+        const kids = await graphGet(
+          `https://graph.microsoft.com/v1.0/drives/${drive.id}/root/children?$select=id,name&$top=200`,
+          token, "list library root"
+        );
+        const names = (kids.value || []).map((f) => f.name);
+        item = (kids.value || []).find((f) => f.name === FILE_NAME)
+            || (kids.value || []).find((f) => f.name.trim().toLowerCase() === FILE_NAME.trim().toLowerCase())
+            || null;
+        if (!item) attempts.push(`root listing had: ${names.slice(0, 8).join(" | ") || "nothing"}`);
+      } catch (e) { attempts.push(`list-root: ${e.message.slice(0, 120)}`); }
+    }
+
+    // (d) One level of subfolders — the file may not sit at the root.
+    if (!item) {
+      try {
+        const kids = await graphGet(
+          `https://graph.microsoft.com/v1.0/drives/${drive.id}/root/children?$select=id,name,folder&$top=100`,
+          token, "list folders"
+        );
+        const folders = (kids.value || []).filter((f) => f.folder);
+        for (const f of folders) {
+          const sub = await graphGet(
+            `https://graph.microsoft.com/v1.0/drives/${drive.id}/items/${f.id}/children?$select=id,name&$top=200`,
+            token, `scan folder ${f.name}`
+          );
+          const hit = (sub.value || []).find(
+            (x) => x.name === FILE_NAME ||
+                   x.name.trim().toLowerCase() === FILE_NAME.trim().toLowerCase()
+          );
+          if (hit) { item = hit; break; }
+        }
+        if (!item) attempts.push(`scanned ${folders.length} folder(s), no match`);
+      } catch (e) { attempts.push(`folder-scan: ${e.message.slice(0, 120)}`); }
+    }
+
+    if (!item) {
+      throw new Error(`Could not locate "${FILE_NAME}". Tried — ${attempts.join(" ;; ")}`);
+    }
 
     // Confirm the worksheet exists and get its EXACT name. Graph returns an
     // unhelpful 500 "generalException" if the sheet name doesn't match
