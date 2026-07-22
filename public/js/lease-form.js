@@ -1,0 +1,551 @@
+// /public/js/lease-form.js — Deal Sheet: Leasing Record
+(function () {
+  const cfg = window.DealSheetConfig;
+  const api = window.DealSheetApi;
+  const $ = (id) => document.getElementById(id);
+  const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) =>
+    ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+  const num = (v) => { const n = parseFloat(String(v ?? "").replace(/[$,\s%]/g, "")); return isNaN(n) ? 0 : n; };
+  const fmt = (n) => Number(n || 0).toLocaleString("en-NZ", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
+  const DIVISIONS = ["Industrial","Office","Retail","Investment Sales","Land","Rural & Agribusiness","Other"];
+  const DEAL_TYPES = ["Relocation","Expansion","Assignment","Renegotiation"];
+  let BROKERS = [];
+
+  // Rental schedule lines — mirrors api/_lib/leases.js RENTAL_LINES.
+  const RENTAL_LINES = [
+    { key:"retail",    label:"Retail",        unit:"sqm",  rateLabel:"$ psqm" },
+    { key:"office",    label:"Office",        unit:"sqm",  rateLabel:"$ psqm" },
+    { key:"warehouse", label:"Warehouse",     unit:"sqm",  rateLabel:"$ psqm" },
+    { key:"canopy",    label:"Canopy / Deck", unit:"sqm",  rateLabel:"$ psqm" },
+    { key:"naming",    label:"Naming Rights", unit:null,   rateLabel:"" },
+    { key:"carparks",  label:"Carparks",      unit:"cpks", rateLabel:"$ ppkpw" },
+    { key:"other1",    label:"Other",         unit:null,   rateLabel:"" },
+    { key:"other2",    label:"Other",         unit:null,   rateLabel:"" },
+  ];
+
+  const emptyRental = () => {
+    const r = {};
+    RENTAL_LINES.forEach(l => { r[l.key] = { qty:"", rate:"", total:"" }; });
+    r.opex = ""; r.rates = "";
+    return r;
+  };
+
+  const state = {
+    currentId: null,
+    saveTimer: null,
+    userName: "",
+    triedSubmit: false,
+    resumed: false,
+    returnNote: "",
+    f: {
+      ownership: { salespeople: [], division: "Industrial", office: "Christchurch" },
+      property: { address:"", buildingName:"", propertyType:"", level:"", unit:"", city:"Christchurch" },
+      lessor:   { name:"", phone:"", contactName:"", email:"", postalAddress:"", city:"", country:"New Zealand", postcode:"", solicitorName:"", solicitorFirm:"", solicitorPhone:"", parentCompany:"" },
+      lessee:   { name:"", phone:"", contactName:"", email:"", postalAddress:"", city:"", country:"New Zealand", postcode:"", solicitorName:"", solicitorFirm:"", solicitorPhone:"" },
+      invoiceToLessee: false,
+      billingDifferent: false,
+      billing:  { name:"", phone:"", contactName:"", email:"", postalAddress:"", city:"", country:"New Zealand", postcode:"" },
+      lease: {
+        dateOfAgreement:"", unconditionalDate:"", occupancyDate:"",
+        termYears:"", rorYears:"", rorTimes:"",
+        commencementDate:"", expiryDate:"", rentReviewPeriod:"",
+        dealType:"", leaseBasis:"Net", incentives:"",
+      },
+      rental: emptyRental(),
+      depositToTrust: false,
+      deposit: { amount:"", dateReceived:"", receiptNo:"", earlyRelease:false },
+      // Commission amounts are entered manually for leases.
+      comm: { fee:"", otherDesc:"", otherFee:"", adminFee:true, recoverMarketing:"", recoverOtherDesc:"", recoverOther:"" },
+      splits: [ {person:"",pct:""},{person:"",pct:""},{person:"",pct:""},{person:"",pct:""},{person:"",pct:""} ],
+      thirdParty: [ {name:"",pct:""},{name:"",pct:""},{name:"",pct:""} ],
+      tenantSource: "", tenantSourceOther: "", tenantReferralWho: "",
+      checklist: { agencyAgreement:false, unconditionalConfirmation:false, leaseValueConfirmation:false,
+                   marketingReport:false, amlComplete:false, leaseDeed:false, appraisals:false },
+      attachments: {},
+    },
+  };
+
+  // ---------- path get/set ----------
+  const get = (path) => path.split(".").reduce((o,k) => (o||{})[k], state.f);
+  const set = (path, val) => {
+    const keys = path.split("."); const last = keys.pop();
+    let o = state.f; keys.forEach(k => { o = o[k] = o[k] ?? {}; });
+    o[last] = val;
+  };
+
+  // ---------- derived (mirrors api/_lib/leases.js) ----------
+  function derive() {
+    const f = state.f, r = f.rental;
+
+    const lineTotals = {};
+    RENTAL_LINES.forEach(({ key, unit }) => {
+      const line = r[key] || {};
+      let t;
+      if (key === "carparks") t = num(line.qty) * num(line.rate) * 52;
+      else if (unit === "sqm") t = num(line.qty) * num(line.rate);
+      else t = num(line.total);
+      // An explicitly entered total wins over the calculated one.
+      if (unit && line.total !== "" && line.total != null) t = num(line.total);
+      lineTotals[key] = t;
+    });
+
+    const netRental = Object.values(lineTotals).reduce((a,b) => a+b, 0);
+    const opex = num(r.opex), rates = num(r.rates);
+    const grossRental = netRental + opex + rates;
+    const totalArea = RENTAL_LINES.filter(l => l.unit === "sqm")
+      .reduce((a,l) => a + num((r[l.key]||{}).qty), 0);
+
+    const adminFee = f.comm.adminFee ? 500 : 0;
+    const totalInvoice = num(f.comm.fee) + num(f.comm.otherFee) + adminFee
+      + num(f.comm.recoverMarketing) + num(f.comm.recoverOther);
+
+    const commissionBase = totalInvoice - adminFee;
+    const thirdPartyPctTotal = f.thirdParty.reduce((a,s) => a + num(s.pct), 0);
+    const thirdPartyTotal = f.thirdParty.reduce((a,s) => a + (num(s.pct)/100)*commissionBase, 0);
+    const internalPool = totalInvoice - thirdPartyTotal;
+    const internalPctTotal = f.splits.reduce((a,s) => a + num(s.pct), 0);
+    const internalOk = internalPctTotal === 0 || Math.abs(internalPctTotal - 100) < 0.01;
+
+    return { lineTotals, netRental, opex, rates, grossRental, totalArea,
+             adminFee, totalInvoice, commissionBase, thirdPartyPctTotal,
+             thirdPartyTotal, internalPool, internalPctTotal, internalOk };
+  }
+
+  function validate(d) {
+    const f = state.f, m = [];
+    if (!f.ownership.salespeople.length) m.push("Salesperson");
+    if (!f.property.address.trim()) m.push("Property address");
+    if (!f.lessor.name) m.push("Lessor name");
+    if (!f.lessee.name) m.push("Lessee name");
+    if (!f.lease.dateOfAgreement) m.push("Date of agreement");
+    if (!f.lease.commencementDate) m.push("Commencement date");
+    if (!f.lease.termYears) m.push("Lease term");
+    if (!d.grossRental) m.push("Rental schedule");
+    if (!d.totalInvoice) m.push("Commission amount");
+    if (d.internalPctTotal === 0) m.push("Commission split");
+    else if (!d.internalOk) m.push("Salesperson split must total 100%");
+    if (d.thirdPartyPctTotal >= 100) m.push("Third-party share must be under 100%");
+    if (!f.tenantSource) m.push("Tenant source");
+    const c = f.checklist;
+    if (!c.agencyAgreement) m.push("Checklist — signed agency agreement");
+    if (!c.unconditionalConfirmation) m.push("Checklist — confirmation of unconditional");
+    if (!c.leaseValueConfirmation) m.push("Checklist — confirmation of lease value");
+    if (!c.marketingReport) m.push("Checklist — marketing campaign report");
+    if (!c.amlComplete) m.push("Checklist — AML complete");
+    if (!c.leaseDeed) m.push("Checklist — lease deed");
+    if (f.depositToTrust && !c.appraisals) m.push("Checklist — appraisals (trust deal)");
+    return m;
+  }
+
+  // ---------- autosave ----------
+  let saveState = "";
+  function scheduleAutosave() {
+    clearTimeout(state.saveTimer);
+    saveState = "Saving…"; updateSaveState();
+    state.saveTimer = setTimeout(async () => {
+      try {
+        const r = await api.saveDraft(state.f, state.currentId, "lease");
+        state.currentId = r.id;
+        saveState = "Draft saved";
+      } catch (e) { saveState = "Save failed — will retry"; }
+      updateSaveState();
+    }, 1500);
+  }
+  function updateSaveState() { const el = $("saveState"); if (el) el.textContent = saveState; }
+
+  // ---------- builders ----------
+  const txt = (path, label, opts = {}) => {
+    const { ph = "", type = "text", span = 1, req = false } = opts;
+    return `<label class="fld span${span}"><span class="lbl">${label}${req ? '<em class="req">*</em>' : ''}</span>
+      <input type="${type}" data-path="${path}" value="${esc(get(path))}" placeholder="${esc(ph)}" /></label>`;
+  };
+  const sel = (path, label, options, span = 1) =>
+    `<label class="fld span${span}"><span class="lbl">${label}</span>
+      <select data-path="${path}"><option value="">Select…</option>
+      ${options.map(o => `<option value="${esc(o)}" ${get(path)===o?"selected":""}>${esc(o)}</option>`).join("")}
+      </select></label>`;
+  const chk = (path, label) =>
+    `<label class="chk"><input type="checkbox" data-path="${path}" ${get(path)?"checked":""} /><span>${label}</span></label>`;
+  const party = (base, solicitor, req) => `<div class="grid">
+    ${txt(base+".name","Name",{span:2,req})}${txt(base+".phone","Phone")}
+    ${txt(base+".contactName","Contact name",{span:2})}${txt(base+".email","Email",{type:"email"})}
+    ${txt(base+".postalAddress","Postal address",{span:2})}${txt(base+".postcode","Postcode")}
+    ${txt(base+".city","City")}${txt(base+".country","Country")}
+    ${solicitor ? txt(base+".solicitorName","Solicitor")+txt(base+".solicitorFirm","Firm")+txt(base+".solicitorPhone","Solicitor phone") : ""}
+  </div>`;
+  const section = (n, title, note, inner) => `<section class="card"><header class="cardHead">
+    <span class="secNo">${n}</span><div><h2>${title}</h2>${note?`<p class="note">${note}</p>`:""}</div></header>${inner}</section>`;
+
+  function uploadSlot(slotKey, label) {
+    const a = state.f.attachments[slotKey];
+    if (a) {
+      return `<div class="upSlot done" data-slot="${slotKey}">
+        <span class="upFile">📎 ${esc(a.name)}</span>
+        <button type="button" class="upRemove" data-slot="${slotKey}">Remove</button></div>`;
+    }
+    return `<div class="upSlot" data-slot="${slotKey}">
+      <label class="upBtn">Attach file<input type="file" class="upInput" data-slot="${slotKey}" hidden /></label>
+      <span class="upHint">${label}</span>
+      <span class="upProgress hidden" data-slot="${slotKey}">Uploading…</span></div>`;
+  }
+
+  // ---------- render ----------
+  function render() {
+    const d = derive();
+    const missing = validate(d);
+    const f = state.f;
+
+    const brokerChips = BROKERS.map(b => {
+      const on = f.ownership.salespeople.includes(b.code);
+      return `<button type="button" class="chip ${on?"on":""}" data-broker="${b.code}">${esc(b.name)}</button>`;
+    }).join("");
+
+    // Rental schedule rows
+    const rentalRows = RENTAL_LINES.map(l => {
+      const line = f.rental[l.key] || {};
+      const calc = d.lineTotals[l.key];
+      const showCalc = calc ? fmt(calc) : "";
+      return `<tr>
+        <td>${l.label}</td>
+        <td>${l.unit ? `<input class="cell" data-recalc data-path="rental.${l.key}.qty" value="${esc(line.qty)}" placeholder="${l.unit}" />` : ""}</td>
+        <td>${l.rateLabel ? `<input class="cell" data-recalc data-path="rental.${l.key}.rate" value="${esc(line.rate)}" placeholder="${l.rateLabel}" />` : ""}</td>
+        <td class="r"><input class="cell r" data-recalc data-path="rental.${l.key}.total" value="${esc(line.total)}" placeholder="${showCalc || "0.00"}" /></td>
+      </tr>`;
+    }).join("");
+
+    const splitRows = f.splits.map((s,i) => `<tr>
+      <td><input class="cell" data-path="splits.${i}.person" value="${esc(s.person)}" placeholder="Name" /></td>
+      <td><input class="cell" data-recalc data-path="splits.${i}.pct" value="${esc(s.pct)}" placeholder="%" /></td>
+      <td class="r mono">${num(s.pct)?fmt((num(s.pct)/100)*d.internalPool):"—"}</td></tr>`).join("");
+
+    const tpRows = f.thirdParty.map((s,i) => `<tr>
+      <td><input class="cell" data-path="thirdParty.${i}.name" value="${esc(s.name)}" placeholder="Company / office" /></td>
+      <td><input class="cell" data-recalc data-path="thirdParty.${i}.pct" value="${esc(s.pct)}" placeholder="%" /></td>
+      <td class="r mono">${num(s.pct)?fmt((num(s.pct)/100)*d.commissionBase):"—"}</td></tr>`).join("");
+
+    $("app").innerHTML = `
+      <header class="top">
+        <div class="brand"><span class="brandMark">SIC</span>
+          <div><h1>Deal Sheet — Leasing Record</h1><p>South Island Commercial (2004) Limited · Colliers</p></div></div>
+        <div style="text-align:right">
+          <a href="admin.html" class="linkBtn" style="display:inline-block;margin-bottom:8px">← All deal sheets</a>
+          <div class="accountsBox"><span class="tag">Completed by accounts</span>
+          <div class="acctFields"><label><span>File No.</span><input disabled placeholder="—" /></label>
+          <label><span>Deal No.</span><input disabled placeholder="—" /></label></div></div>
+        </div>
+      </header>
+      <p class="mandate">Complete <strong>all</strong> categories for commission to be paid promptly.</p>
+      ${state.returnNote ? `<div class="warnBanner"><strong>Returned by accounts.</strong> ${esc(state.returnNote.replace(/^Returned to broker:\s*/, ""))}</div>` : ""}
+      ${state.triedSubmit && missing.length ? `<div class="warnBanner"><strong>Not ready to send.</strong> Outstanding: ${missing.map(esc).join(" · ")}</div>` : ""}
+
+      <div class="layout">
+        <div class="col">
+          ${section("1","Deal ownership","Select every broker on this deal.",`
+            <div class="chips">${brokerChips}</div>
+            <div class="grid" style="margin-top:12px">
+              ${sel("ownership.division","Division",DIVISIONS)}
+              ${txt("ownership.office","Office")}</div>`)}
+
+          ${section("2","Property details","",`
+            <div class="grid">
+              ${txt("property.address","Address",{span:3,req:true,ph:"e.g. Unit 2, 14 Leeds Street, Hornby"})}
+              ${txt("property.buildingName","Building name",{span:2})}${txt("property.level","Level")}
+              ${txt("property.unit","Unit")}${txt("property.city","City")}
+              ${txt("property.propertyType","Property type",{ph:"e.g. Warehouse"})}</div>`)}
+
+          ${section("3","Lessor","",party("lessor",true,true) +
+            `<div class="grid" style="margin-top:10px">${txt("lessor.parentCompany","Lessor parent company",{span:3})}</div>`)}
+
+          ${section("4","Lessee","",party("lessee",true,true) +
+            `<div style="margin-top:10px">${chk("invoiceToLessee","Raise the invoice to the Lessee")}</div>`)}
+
+          ${section("5","Billing entity","Legal entity for invoicing. Leave unticked if the same as the Lessor.",`
+            ${chk("billingDifferent","Billing entity differs from the Lessor")}
+            ${f.billingDifferent ? party("billing",false,false) : ""}`)}
+
+          ${section("6","Lease details","",`
+            <div class="grid">
+              ${txt("lease.dateOfAgreement","Date of agreement",{type:"date",req:true})}
+              ${txt("lease.unconditionalDate","Unconditional date",{type:"date"})}
+              ${txt("lease.occupancyDate","Occupancy date",{type:"date"})}
+              ${txt("lease.termYears","Lease term (years)",{req:true,ph:"e.g. 6"})}
+              ${txt("lease.rorTimes","Rights of renewal (number)",{ph:"e.g. 2"})}
+              ${txt("lease.rorYears","ROR term each (years)",{ph:"e.g. 3"})}
+              ${txt("lease.commencementDate","Commencement date",{type:"date",req:true})}
+              ${txt("lease.expiryDate","Expiry date",{type:"date"})}
+              ${txt("lease.rentReviewPeriod","Rent review period",{ph:"e.g. 2 yearly"})}
+              ${sel("lease.dealType","Deal type",DEAL_TYPES)}
+              ${sel("lease.leaseBasis","Lease basis",["Net","Gross"])}
+              ${txt("lease.incentives","Incentives",{span:3,ph:"e.g. 3 months rent free"})}</div>`)}
+
+          ${section("7","Rental schedule","Line totals calculate from area × rate — overtype any total to set it manually. Carpark rate is per park per week.",`
+            <table class="tbl rentalTbl">
+              <thead><tr><th></th><th>Area / Number</th><th>Net rental rate</th><th class="r">Total rental $</th></tr></thead>
+              <tbody>${rentalRows}</tbody>
+              <tfoot>
+                <tr class="sub"><td colspan="3">Total Net Rental (excl GST)</td><td class="r mono">${fmt(d.netRental)}</td></tr>
+                <tr><td colspan="3">Plus Opex</td><td class="r"><input class="cell r" data-recalc data-path="rental.opex" value="${esc(f.rental.opex)}" placeholder="0.00" /></td></tr>
+                <tr><td colspan="3">Plus Rates</td><td class="r"><input class="cell r" data-recalc data-path="rental.rates" value="${esc(f.rental.rates)}" placeholder="0.00" /></td></tr>
+                <tr class="total"><td colspan="3">Total Gross Rental (excl GST) p.a.</td><td class="r mono">${fmt(d.grossRental)}</td></tr>
+              </tfoot></table>`)}
+
+          ${section("8","Trust deposit","Complete only if a deposit is paid into the Colliers trust account.",`
+            ${chk("depositToTrust","A deposit will be paid into the trust account")}
+            ${f.depositToTrust ? `<div class="grid" style="margin-top:10px">
+                ${txt("deposit.amount","Deposit amount")}${txt("deposit.dateReceived","Date received",{type:"date"})}
+                ${txt("deposit.receiptNo","Trust receipt no.")}</div>
+                <div style="margin-top:8px">${chk("deposit.earlyRelease","Early release required (authorisation forms)")}</div>` : ""}`)}
+
+          ${section("9","Commission calculation","Enter the commission amounts directly.",`
+            <table class="tbl"><thead><tr><th>Item</th><th>Description</th><th class="r">Amount $</th></tr></thead>
+              <tbody>
+                <tr><td>Commission (per scale of fees)</td><td></td>
+                  <td class="r"><input class="cell r" data-recalc data-path="comm.fee" value="${esc(f.comm.fee)}" placeholder="0.00" /></td></tr>
+                <tr><td>Other / consultancy</td>
+                  <td><input class="cell" data-path="comm.otherDesc" value="${esc(f.comm.otherDesc)}" placeholder="Please specify" /></td>
+                  <td class="r"><input class="cell r" data-recalc data-path="comm.otherFee" value="${esc(f.comm.otherFee)}" placeholder="0.00" /></td></tr>
+                <tr><td colspan="2"><div class="feeRow">
+                  <label class="chk"><input type="checkbox" id="feeAdmin" ${f.comm.adminFee?"checked":""} /><span>Administration fee ($500)</span></label>
+                  </div></td><td class="r mono">${fmt(d.adminFee)}</td></tr>
+                <tr><td>Recover marketing costs</td><td colspan="1"></td>
+                  <td class="r"><input class="cell r" data-recalc data-path="comm.recoverMarketing" value="${esc(f.comm.recoverMarketing)}" placeholder="0.00" /></td></tr>
+                <tr><td>Recover other costs</td>
+                  <td><input class="cell" data-path="comm.recoverOtherDesc" value="${esc(f.comm.recoverOtherDesc)}" placeholder="Please specify" /></td>
+                  <td class="r"><input class="cell r" data-recalc data-path="comm.recoverOther" value="${esc(f.comm.recoverOther)}" placeholder="0.00" /></td></tr>
+                <tr class="total"><td colspan="2">Total amount to be invoiced (excl GST)</td><td class="r mono">${fmt(d.totalInvoice)}</td></tr>
+              </tbody></table>`)}
+
+          ${section("10","Commission split","Third parties take a percentage of the commission (excluding the administration fee). Salespeople then split what remains, which must total 100%.",`
+            <h3 class="subHead">Third party / other office <span class="dim">(conjunctional / referral — % of commission)</span></h3>
+            <table class="tbl"><tbody>${tpRows}</tbody></table>
+            ${d.thirdPartyTotal ? `<div class="poolNote">Third party share: <b>$${fmt(d.thirdPartyTotal)}</b> of $${fmt(d.commissionBase)} commission</div>` : ""}
+            <h3 class="subHead">Salespeople <span class="dim">(split the remaining $${fmt(d.internalPool)})</span></h3>
+            <table class="tbl"><thead><tr><th>Salesperson</th><th>%</th><th class="r">Amount $</th></tr></thead><tbody>${splitRows}</tbody></table>
+            <div class="splitStatus ${d.internalPctTotal===0?"":d.internalOk?"ok":"bad"}">Salesperson split: ${d.internalPctTotal.toFixed(2)}%${d.internalPctTotal!==0?(d.internalOk?" ✓":" — must equal 100%"):""}</div>`)}
+
+          ${section("11","Tenant source","",`
+            <div class="grid">
+              ${sel("tenantSource","Tenant source",["Advert","Sign","Website","Relationship","Moving Times","Canvassing","Referral","Other"],2)}
+              ${f.tenantSource==="Referral" ? txt("tenantReferralWho","Referral from") : ""}
+              ${f.tenantSource==="Other" ? txt("tenantSourceOther","Please specify") : ""}</div>`)}
+
+          ${section("12","Mandatory checklist","The invoice will not be raised until every relevant box is ticked.",`
+            <div class="checkRow">${chk("checklist.agencyAgreement","Signed agency agreement attached")}${uploadSlot("agencyAgreement","")}</div>
+            <div class="checkRow">${chk("checklist.unconditionalConfirmation","Confirmation of unconditional attached")}${uploadSlot("unconditionalConfirmation","")}</div>
+            <div class="checkRow">${chk("checklist.leaseValueConfirmation","Confirmation of lease value")}${uploadSlot("leaseValueConfirmation","e.g. schedule from the lease agreement")}</div>
+            <div class="checkRow">${chk("checklist.marketingReport","Marketing campaign report attached")}${uploadSlot("marketingReport","")}</div>
+            <div class="checkRow">${chk("checklist.amlComplete","AML complete")}${uploadSlot("amlComplete","")}</div>
+            <div class="checkRow">${chk("checklist.leaseDeed","Lease deed attached")}${uploadSlot("leaseDeed","")}</div>
+            ${f.depositToTrust ? `<div class="checkRow">${chk("checklist.appraisals","Appraisals (trust deals)")}${uploadSlot("appraisals","")}</div>` : ""}`)}
+
+          ${section("13","Sign-off","",`<div class="grid">
+            <label class="fld span2"><span class="lbl">Prepared by</span>
+              <input disabled value="${esc(state.userName || "")}" /></label>
+            <label class="fld"><span class="lbl">Date</span><input disabled value="${new Date().toLocaleDateString("en-NZ")}" /></label></div>
+            <p class="note" style="margin-top:8px">Manager approval to pay commission is completed by accounts / management after submission.</p>`)}
+        </div>
+
+        <aside class="rail">
+          <div class="railCard">
+            <h3>Summary</h3>
+            <dl class="railList">
+              <div><dt>Net rental p.a.</dt><dd>$${fmt(d.netRental)}</dd></div>
+              <div><dt>Gross rental p.a.</dt><dd>$${fmt(d.grossRental)}</dd></div>
+              <div><dt>Total area</dt><dd>${d.totalArea ? fmt(d.totalArea)+" m²" : "—"}</dd></div>
+              <div><dt>To invoice</dt><dd>$${fmt(d.totalInvoice)}</dd></div>
+              <div><dt>Salesperson split</dt><dd class="${d.internalPctTotal&&!d.internalOk?"bad":""}">${d.internalPctTotal.toFixed(0)}%</dd></div>
+            </dl>
+            <div class="railStatus ${missing.length?"":"ok"}">${missing.length?`${missing.length} item${missing.length===1?"":"s"} outstanding`:"Ready to send"}</div>
+            <button class="primary" id="sendBtn">Send to accounts</button>
+            <button class="ghostLight" id="printBtn">Print / Save as PDF</button>
+            <div class="saveState" id="saveState">${esc(saveState)}</div>
+          </div>
+        </aside>
+      </div>`;
+
+    wire();
+  }
+
+  // ---------- events ----------
+  function wire() {
+    $("app").querySelectorAll("[data-path]").forEach((el) => {
+      const path = el.dataset.path;
+      if (el.type === "checkbox") {
+        el.onchange = () => { set(path, el.checked); scheduleAutosave(); render(); };
+      } else if (el.tagName === "SELECT") {
+        el.onchange = () => { set(path, el.value); scheduleAutosave(); render(); };
+      } else if (el.hasAttribute("data-recalc")) {
+        el.oninput = () => { set(path, el.value); scheduleAutosave(); refreshDerived(); };
+      } else {
+        el.oninput = () => { set(path, el.value); scheduleAutosave(); };
+      }
+    });
+
+    $("app").querySelectorAll("[data-broker]").forEach((b) => {
+      b.onclick = () => {
+        const code = b.dataset.broker;
+        const list = state.f.ownership.salespeople;
+        const i = list.indexOf(code);
+        if (i >= 0) list.splice(i,1); else list.push(code);
+        scheduleAutosave(); render();
+      };
+    });
+
+    const feeAdmin = $("feeAdmin");
+    if (feeAdmin) feeAdmin.onchange = () => { state.f.comm.adminFee = feeAdmin.checked; scheduleAutosave(); render(); };
+
+    $("sendBtn").onclick = onSend;
+    const pb = $("printBtn");
+    if (pb) pb.onclick = doPrint;
+
+    wireUploads();
+  }
+
+  // Re-render just the calculated figures, so typing isn't interrupted.
+  function refreshDerived() {
+    const d = derive();
+    const dds = $("app").querySelectorAll(".railList dd");
+    if (dds[0]) dds[0].textContent = "$" + fmt(d.netRental);
+    if (dds[1]) dds[1].textContent = "$" + fmt(d.grossRental);
+    if (dds[2]) dds[2].textContent = d.totalArea ? fmt(d.totalArea)+" m²" : "—";
+    if (dds[3]) dds[3].textContent = "$" + fmt(d.totalInvoice);
+    if (dds[4]) { dds[4].textContent = d.internalPctTotal.toFixed(0)+"%"; dds[4].className = d.internalPctTotal && !d.internalOk ? "bad" : ""; }
+    const missing = validate(d);
+    const st = $("app").querySelector(".railStatus");
+    if (st) { st.textContent = missing.length?`${missing.length} item${missing.length===1?"":"s"} outstanding`:"Ready to send"; st.className = "railStatus" + (missing.length?"":" ok"); }
+  }
+
+  function wireUploads() {
+    $("app").querySelectorAll(".upInput").forEach((input) => {
+      input.onchange = async () => {
+        const slot = input.dataset.slot, file = input.files[0];
+        if (!file) return;
+        if (!state.currentId) {
+          try { const r = await api.saveDraft(state.f, null, "lease"); state.currentId = r.id; }
+          catch (e) { alert("Couldn't start a draft to attach to: " + e.message); return; }
+        }
+        const prog = $("app").querySelector(`.upProgress[data-slot="${slot}"]`);
+        if (prog) prog.classList.remove("hidden");
+        try {
+          const r = await api.uploadAttachment(state.currentId, slot, file);
+          state.f.attachments[slot] = { name: r.file_name, path: r.storage_path, size: r.size_bytes };
+          scheduleAutosave(); render();
+        } catch (e) {
+          alert("Upload failed: " + e.message);
+          if (prog) prog.classList.add("hidden");
+        }
+      };
+    });
+    $("app").querySelectorAll(".upRemove").forEach((btn) => {
+      btn.onclick = async () => {
+        const slot = btn.dataset.slot;
+        try { await api.removeAttachment(state.currentId, slot); } catch (e) { /* ignore */ }
+        delete state.f.attachments[slot];
+        scheduleAutosave(); render();
+      };
+    });
+  }
+
+  // ---------- print ----------
+  async function doPrint() {
+    if (!state.currentId) {
+      try { const r = await api.saveDraft(state.f, null, "lease"); state.currentId = r.id; }
+      catch (e) { alert("Save the deal sheet before printing: " + e.message); return; }
+    } else {
+      try { await api.saveDraft(state.f, state.currentId, "lease"); } catch (e) { /* print anyway */ }
+    }
+    api.openPrint(state.currentId);
+  }
+
+  // ---------- submit ----------
+  async function onSend() {
+    state.triedSubmit = true;
+    const d = derive();
+    const missing = validate(d);
+    if (missing.length) { render(); window.scrollTo({top:0,behavior:"smooth"}); return; }
+    if (!confirm("Send this leasing deal sheet to accounts?")) return;
+    try {
+      clearTimeout(state.saveTimer);
+      const r = await api.saveDraft(state.f, state.currentId, "lease");
+      state.currentId = r.id;
+      await api.submit(state.currentId);
+      showDone();
+    } catch (e) {
+      alert("Could not send: " + e.message);
+    }
+  }
+
+  function showDone() {
+    const d = derive(), f = state.f;
+    $("app").innerHTML = `<div class="done">
+      <div class="doneMark">✓</div>
+      <h1>Leasing deal sheet sent to accounts</h1>
+      <p><strong>${esc(f.property.address||"—")}</strong> — gross rental $${fmt(d.grossRental)} p.a., total to invoice $${fmt(d.totalInvoice)} excl GST.</p>
+      <p class="dim">Accounts will assign the File No. and Deal No., raise the invoice and process commission. You'll be copied on the confirmation.</p>
+      <div class="doneBtns">
+        <button class="primary" id="adminBtn">Return to deal sheets</button>
+        <button class="ghost" id="againBtn">Start a new deal sheet</button>
+      </div></div>`;
+    $("againBtn").onclick = () => { location.href = "admin.html"; };
+    $("adminBtn").onclick = () => { location.href = "admin.html"; };
+  }
+
+  // ---------- boot ----------
+  (async function boot() {
+    if (cfg.DEMO_MODE) $("demoBadge").classList.remove("hidden");
+    try {
+      const account = await window.DealSheetAuth.init();
+      if (!account) return;
+    } catch (e) {
+      $("gate").innerHTML = `<div class="inner">Sign-in failed: ${esc(e.message)}</div>`;
+      return;
+    }
+    state.userName = window.DealSheetAuth.account?.name
+      || window.DealSheetAuth.account?.username || "";
+
+    if (!cfg.DEMO_MODE) {
+      try {
+        await api.listMine();
+        BROKERS = (await api.listBrokers()).map((b) => ({ code: b.code, name: b.first_name }));
+      } catch (e) {
+        if (e.status === 403) {
+          $("gate").innerHTML = `<div class="inner gateMsg">
+            <h2>Access not set up yet</h2>
+            <p>${esc(e.message)}</p>
+            <p class="dim">Send the Object ID above to your administrator.</p></div>`;
+          return;
+        }
+      }
+    }
+
+    const urlId = new URLSearchParams(location.search).get("id");
+    if (urlId && !cfg.DEMO_MODE) {
+      try {
+        const deal = await api.get(urlId);
+        if (!["draft","rejected"].includes(deal.status)) {
+          $("gate").innerHTML = `<div class="inner gateMsg"><h2>This deal sheet can't be edited</h2>
+            <p>It's already with accounts (status: ${esc(deal.status)}).</p>
+            <p class="dim"><a href="admin.html">Back to my deal sheets</a></p></div>`;
+          return;
+        }
+        state.currentId = deal.id;
+        state.f = Object.assign(state.f, deal.form || {});
+        state.returnNote = (deal.events || []).filter((e) => (e.note||"").startsWith("Returned to broker:")).pop()?.note || "";
+      } catch (e) {
+        $("gate").innerHTML = `<div class="inner gateMsg"><h2>Couldn't open that deal sheet</h2>
+          <p>${esc(e.message)}</p><p class="dim"><a href="admin.html">Back to my deal sheets</a></p></div>`;
+        return;
+      }
+    }
+
+    if (cfg.DEMO_MODE && !BROKERS.length) {
+      BROKERS = (await api.listBrokers()).map((b) => ({ code: b.code, name: b.first_name }));
+      state.userName = "Demo Admin";
+    }
+
+    $("gate").classList.add("hidden");
+    $("app").classList.remove("hidden");
+    render();
+  })();
+})();

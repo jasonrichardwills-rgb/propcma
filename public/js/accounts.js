@@ -21,6 +21,11 @@
 
   async function loadQueue() {
     state.queue = await api.getQueue();
+    // Deep-link from the notification email: ?id=<dealId> preselects it.
+    const linkedId = new URLSearchParams(location.search).get("id");
+    if (linkedId && state.queue.some((d) => d.id === linkedId)) {
+      state.selectedId = linkedId;
+    }
     if (!state.selectedId && state.queue.length) state.selectedId = state.queue[0].id;
     if (state.selectedId) await loadDeal(state.selectedId);
     render();
@@ -76,7 +81,7 @@
               `<button class="fbtn ${state.filter===s?"on":""}" data-filter="${s}">${s==="all"?"All":META[s].label}</button>`).join("")}
           </div>
           ${shown.map((d) => `<button class="row ${state.selectedId===d.id?"sel":""}" data-id="${d.id}">
-            <div class="rowTop"><strong>${esc(d.property_address||"—")}</strong>
+            <div class="rowTop"><strong>${d.deal_type==="lease"?`<span class="typePill lease">Lease</span> `:""}${esc(d.property_address||"—")}</strong>
               <span class="pill ${META[d.status].cls}">${META[d.status].label}</span></div>
             <div class="rowSub">${esc(d.salesperson||"")} · ${esc(d.division||"")} · $${fmt(d.total_invoice_ex_gst)} to invoice
               ${d.deposit_to_trust?'<span class="trustDot"> · TRUST</span>':""}

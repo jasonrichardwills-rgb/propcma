@@ -28,6 +28,11 @@ const num = (v) => {
  * (snake_case; `auction` is boolean; there is no conjunction column).
  */
 export function toPropertyRow(deal, newId, brokerNames = {}) {
+  // Leases map differently: the lease term/rental replaces sale details,
+  // and the total GROSS ANNUAL rental goes into sale_price so leasing
+  // rates compare on a consistent annual basis.
+  if (deal.deal_type === "lease") return toLeasePropertyRow(deal, newId, brokerNames);
+
   const form = deal.form || {};
   const sale = form.sale || {};
 
@@ -41,7 +46,11 @@ export function toPropertyRow(deal, newId, brokerNames = {}) {
     ? num(sale.yieldManual)
     : (salePrice && annualRent ? +((annualRent / salePrice) * 100).toFixed(2) : null);
 
-  // Brokers: full first names, comma separated.
+  // Category comes from the Division dropdown (a controlled list),
+  // not the free-text property type. "Investment Sales" is recorded
+  // as "Investment" in PropCMA.
+  const divisionToCategory = (div) =>
+    div === "Investment Sales" ? "Investment" : (div || null);
   const brokers = (form.ownership?.salespeople || [])
     .map((code) => brokerNames[code] || code)
     .join(", ");
@@ -59,7 +68,7 @@ export function toPropertyRow(deal, newId, brokerNames = {}) {
     sale_date_ts: Number.isFinite(saleDateTs) ? saleDateTs : null,
     lease_or_sale: "Sale",          // deal sheet is the Sales Record
     auction: !!sale.auction,        // boolean column
-    category: form.property?.propertyType || null,
+    category: divisionToCategory(form.ownership?.division),
     sqm: sqm,
     sale_price: salePrice,
     price_per_sqm: salePrice && sqm ? +(salePrice / sqm).toFixed(2) : null,
@@ -106,4 +115,57 @@ export async function pushToPropCMA(deal) {
     return { ok: false, error: error.message };
   }
   return { ok: true, id: newId };
+}
+
+/**
+ * Build the properties row for an invoiced LEASE.
+ *
+ * Key differences from a sale:
+ *   - lease_or_sale = "Lease"
+ *   - sale_price    = total GROSS annual rental (not a capital value),
+ *                     so leasing rates compare across different terms
+ *   - price_per_sqm = rent per m² per year (the standard leasing metric)
+ *   - annual_rent   = the same gross annual figure
+ *   - auction       = false; a lease is never an auction
+ */
+export function toLeasePropertyRow(deal, newId, brokerNames = {}) {
+  const form = deal.form || {};
+  const lease = form.lease || {};
+
+  const grossAnnual = num(deal.annual_gross_rent) ?? num(deal.sale_price_ex_gst);
+  // Total leased area across the sqm lines.
+  const r = form.rental || {};
+  const area = ["retail", "office", "warehouse", "canopy"]
+    .reduce((a, k) => a + (num((r[k] || {}).qty) || 0), 0);
+
+  const brokers = (form.ownership?.salespeople || [])
+    .map((code) => brokerNames[code] || code)
+    .join(", ");
+
+  const divisionToCategory = (div) =>
+    div === "Investment Sales" ? "Investment" : (div || null);
+
+  const dateIso = lease.commencementDate || lease.dateOfAgreement || null;
+  const dateTs = dateIso ? Date.parse(dateIso) : null;
+
+  return {
+    id: newId,
+    address: deal.property_address || form.property?.address || null,
+    sale_date: dateIso,
+    sale_date_ts: Number.isFinite(dateTs) ? dateTs : null,
+    lease_or_sale: "Lease",
+    auction: false,
+    category: divisionToCategory(form.ownership?.division),
+    sqm: area || null,
+    sale_price: grossAnnual,
+    price_per_sqm: grossAnnual && area ? +(grossAnnual / area).toFixed(2) : null,
+    purchaser: deal.purchaser_name || null,   // Lessee
+    vendor: deal.vendor_name || null,         // Lessor
+    initial_yield: null,                      // not meaningful for a lease
+    annual_rent: grossAnnual,
+    land_area: null,
+    notes: null,
+    broker: brokers || null,
+    wale: num(lease.termYears) || null,       // lease term as the WALE
+  };
 }

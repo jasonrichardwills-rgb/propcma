@@ -272,3 +272,20 @@ tfoot td{border-top:2px solid var(--navy);border-bottom:none;font-weight:700;pad
 .compTable tbody tr:hover{background:#F8FAFD;cursor:pointer;}
 .linkBtn{background:none;border:none;color:var(--cyan);cursor:pointer;font-size:13px;
   text-decoration:underline;padding:0;font-family:inherit;}
+
+.doneBtns{display:flex;gap:10px;justify-content:center;flex-wrap:wrap;margin-top:8px;}
+.doneBtns .primary,.doneBtns .ghost{width:auto;}
+
+/* ---------- leasing / deal type ---------- */
+.newDeal{display:flex;align-items:center;gap:8px;}
+.newDealLbl{font-size:13px;color:var(--dim);margin-right:2px;}
+.newDeal .primary{text-decoration:none;display:inline-block;width:auto;padding:9px 20px;font-size:13.5px;}
+.newDeal .primary.alt{background:#0F766E;}
+.newDeal .primary.alt:hover{background:#0d635c;}
+.typePill{font-size:10.5px;font-weight:700;text-transform:uppercase;letter-spacing:.4px;
+  padding:2px 8px;border-radius:999px;}
+.typePill.sale{background:#E8F0FB;color:var(--navy);}
+.typePill.lease{background:#E6F4F1;color:#0F766E;}
+.rentalTbl td:first-child{white-space:nowrap;color:var(--ink);font-weight:500;}
+.rentalTbl tfoot tr.sub td{border-top:1px solid var(--line);font-weight:600;}
+.rentalTbl tfoot tr.total td{border-top:2px solid var(--navy);font-weight:700;}

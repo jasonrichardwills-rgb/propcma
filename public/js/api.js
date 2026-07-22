@@ -30,7 +30,8 @@
 
   const live = {
     listMine: () => call("?scope=mine"),
-    saveDraft: (form, id) => call("", { method: "POST", body: { id, form } }),
+    saveDraft: (form, id, dealType) =>
+      call("", { method: "POST", body: { form, id, dealType } }),
     submit: (id) => call(`/${id}/submit`, { method: "POST" }),
     get: (id) => call(`/${id}`),
     getQueue: (status) => call(`?scope=queue${status ? `&status=${status}` : ""}`),
@@ -153,7 +154,7 @@
   const demo = {
     listMine: () => delay(demoStore.deals.map(({ id, status, property_address, vendor_name, total_invoice_ex_gst }) =>
       ({ id, status, property_address, vendor_name, total_invoice_ex_gst }))),
-    saveDraft: (form, id) => {
+    saveDraft: (form, id, dealType) => {
       let d = id && findDeal(id);
       if (!d) {
         d = { id: `ds-${demoStore.seq++}`, status: "draft", splits: [], events: [] };
