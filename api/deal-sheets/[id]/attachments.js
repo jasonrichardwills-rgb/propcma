@@ -27,8 +27,11 @@ const ALLOWED = new Set([
   "image/jpeg", "image/png",
 ]);
 const VALID_SLOTS = new Set([
+  // Sales deal sheet
   "tenancySchedule", "agencyAgreement", "unconditionalConfirmation",
   "salePriceConfirmation", "marketingReport", "amlComplete", "spAgreement",
+  // Leasing deal sheet
+  "leaseValueConfirmation", "leaseDeed", "appraisals",
 ]);
 
 export default async function handler(req, res) {
