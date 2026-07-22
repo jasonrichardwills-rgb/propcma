@@ -2037,7 +2037,7 @@ async function exportPDF(){
     },
     properties:sel.map(p=>({
       address:p.address||'',
-      sale_date:p.saleDate||'',
+      sale_date:displayDate(p.saleDate)==='—'?'':displayDate(p.saleDate),
       category:p.category||'',
       lease_or_sale:p.leaseOrSale||'',
       sqm:p.sqm||null,
@@ -2163,7 +2163,7 @@ function openEdit(propId,event){
   document.getElementById('so-title').textContent='Edit property';
   document.getElementById('so-sub').textContent=p.address||'';
   document.getElementById('so-address-display').textContent=p.address||'—';
-  document.getElementById('so-date-display').textContent=p.saleDate||'—';
+  document.getElementById('so-date-display').textContent=displayDate(p.saleDate);
   // Category dropdown — always editable so incorrect values can be fixed
   const KNOWN_CATS=['','Commercial','Industrial','Retail','Investment','Office','Land'];
   const catSel=document.getElementById('so-category');
@@ -2230,7 +2230,7 @@ function openPropSummary(id){
     _psumPhotoHtml(p)+
     '<div class="psum-grid">'+
       _psumField('Address',p.address,true)+
-      _psumField('Date Sold',p.saleDate)+
+      _psumField('Date Sold',displayDate(p.saleDate))+
       _psumField('Category',p.category)+
       _psumField('Lease / Sale',p.leaseOrSale)+
       _psumField('Auction',p.auction?'Yes':'No')+
