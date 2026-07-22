@@ -217,12 +217,12 @@
     const splitRows = f.splits.map((s,i) => `<tr>
       <td><input class="cell" data-path="splits.${i}.person" value="${esc(s.person)}" placeholder="Name" /></td>
       <td><input class="cell" data-recalc data-path="splits.${i}.pct" value="${esc(s.pct)}" placeholder="%" /></td>
-      <td class="r mono">${num(s.pct)?fmt((num(s.pct)/100)*d.internalPool):"—"}</td></tr>`).join("");
+      <td class="r mono" id="splitAmt${i}">${num(s.pct)?fmt((num(s.pct)/100)*d.internalPool):"—"}</td></tr>`).join("");
 
     const tpRows = f.thirdParty.map((s,i) => `<tr>
       <td><input class="cell" data-path="thirdParty.${i}.name" value="${esc(s.name)}" placeholder="Company / office" /></td>
       <td><input class="cell" data-recalc data-path="thirdParty.${i}.pct" value="${esc(s.pct)}" placeholder="%" /></td>
-      <td class="r mono">${num(s.pct)?fmt((num(s.pct)/100)*d.commissionBase):"—"}</td></tr>`).join("");
+      <td class="r mono" id="tpAmt${i}">${num(s.pct)?fmt((num(s.pct)/100)*d.commissionBase):"—"}</td></tr>`).join("");
 
     $("app").innerHTML = `
       <header class="top">
@@ -284,10 +284,10 @@
               <thead><tr><th></th><th>Area / Number</th><th>Net rental rate</th><th class="r">Total rental $</th></tr></thead>
               <tbody>${rentalRows}</tbody>
               <tfoot>
-                <tr class="sub"><td colspan="3">Total Net Rental (excl GST)</td><td class="r mono">${fmt(d.netRental)}</td></tr>
+                <tr class="sub"><td colspan="3">Total Net Rental (excl GST)</td><td class="r mono" id="netRentalCell">${fmt(d.netRental)}</td></tr>
                 <tr><td colspan="3">Plus Opex</td><td class="r"><input class="cell r" data-recalc data-path="rental.opex" value="${esc(f.rental.opex)}" placeholder="0.00" /></td></tr>
                 <tr><td colspan="3">Plus Rates</td><td class="r"><input class="cell r" data-recalc data-path="rental.rates" value="${esc(f.rental.rates)}" placeholder="0.00" /></td></tr>
-                <tr class="total"><td colspan="3">Total Gross Rental (excl GST) p.a.</td><td class="r mono">${fmt(d.grossRental)}</td></tr>
+                <tr class="total"><td colspan="3">Total Gross Rental (excl GST) p.a.</td><td class="r mono" id="grossRentalCell">${fmt(d.grossRental)}</td></tr>
               </tfoot></table>`)}
 
           ${section("8","Trust deposit","Complete only if a deposit is paid into the Colliers trust account.",`
@@ -307,20 +307,20 @@
                   <td class="r"><input class="cell r" data-recalc data-path="comm.otherFee" value="${esc(f.comm.otherFee)}" placeholder="0.00" /></td></tr>
                 <tr><td colspan="2"><div class="feeRow">
                   <label class="chk"><input type="checkbox" id="feeAdmin" ${f.comm.adminFee?"checked":""} /><span>Administration fee ($500)</span></label>
-                  </div></td><td class="r mono">${fmt(d.adminFee)}</td></tr>
+                  </div></td><td class="r mono" id="adminFeeCell">${fmt(d.adminFee)}</td></tr>
                 <tr><td>Recover marketing costs</td><td colspan="1"></td>
                   <td class="r"><input class="cell r" data-recalc data-path="comm.recoverMarketing" value="${esc(f.comm.recoverMarketing)}" placeholder="0.00" /></td></tr>
                 <tr><td>Recover other costs</td>
                   <td><input class="cell" data-path="comm.recoverOtherDesc" value="${esc(f.comm.recoverOtherDesc)}" placeholder="Please specify" /></td>
                   <td class="r"><input class="cell r" data-recalc data-path="comm.recoverOther" value="${esc(f.comm.recoverOther)}" placeholder="0.00" /></td></tr>
-                <tr class="total"><td colspan="2">Total amount to be invoiced (excl GST)</td><td class="r mono">${fmt(d.totalInvoice)}</td></tr>
+                <tr class="total"><td colspan="2">Total amount to be invoiced (excl GST)</td><td class="r mono" id="totalInvoiceCell">${fmt(d.totalInvoice)}</td></tr>
               </tbody></table>`)}
 
           ${section("10","Commission split","Third parties take a percentage of the commission (excluding the administration fee). Salespeople then split what remains, which must total 100%.",`
             <h3 class="subHead">Third party / other office <span class="dim">(conjunctional / referral — % of commission)</span></h3>
             <table class="tbl"><tbody>${tpRows}</tbody></table>
-            ${d.thirdPartyTotal ? `<div class="poolNote">Third party share: <b>$${fmt(d.thirdPartyTotal)}</b> of $${fmt(d.commissionBase)} commission</div>` : ""}
-            <h3 class="subHead">Salespeople <span class="dim">(split the remaining $${fmt(d.internalPool)})</span></h3>
+            <div class="poolNote" id="poolNote" ${d.thirdPartyTotal?"":'style="display:none"'}>${d.thirdPartyTotal?`Third party share: <b>$${fmt(d.thirdPartyTotal)}</b> of $${fmt(d.commissionBase)} commission`:""}</div>
+            <h3 class="subHead">Salespeople <span class="dim">(split the remaining $<span id="internalPoolLbl">${fmt(d.internalPool)}</span>)</span></h3>
             <table class="tbl"><thead><tr><th>Salesperson</th><th>%</th><th class="r">Amount $</th></tr></thead><tbody>${splitRows}</tbody></table>
             <div class="splitStatus ${d.internalPctTotal===0?"":d.internalOk?"ok":"bad"}">Salesperson split: ${d.internalPctTotal.toFixed(2)}%${d.internalPctTotal!==0?(d.internalOk?" ✓":" — must equal 100%"):""}</div>`)}
 
@@ -403,17 +403,65 @@
   }
 
   // Re-render just the calculated figures, so typing isn't interrupted.
+  // This must update BOTH the summary rail and the totals sitting inside
+  // the rental / commission tables — those are where the user is looking.
   function refreshDerived() {
     const d = derive();
+
+    // --- rental table: per-line totals (shown as the input's placeholder
+    //     when the user hasn't typed an explicit total) ---
+    RENTAL_LINES.forEach((l) => {
+      const el = $("app").querySelector(`[data-path="rental.${l.key}.total"]`);
+      if (el && document.activeElement !== el) {
+        el.placeholder = d.lineTotals[l.key] ? fmt(d.lineTotals[l.key]) : "0.00";
+      }
+    });
+
+    const setText = (sel, val) => {
+      const el = $("app").querySelector(sel);
+      if (el) el.textContent = val;
+    };
+    setText("#netRentalCell", fmt(d.netRental));
+    setText("#grossRentalCell", fmt(d.grossRental));
+    setText("#adminFeeCell", fmt(d.adminFee));
+    setText("#totalInvoiceCell", fmt(d.totalInvoice));
+
+    // --- split tables: per-row amounts and the pool note ---
+    state.f.splits.forEach((s, i) => {
+      setText(`#splitAmt${i}`, num(s.pct) ? fmt((num(s.pct) / 100) * d.internalPool) : "—");
+    });
+    state.f.thirdParty.forEach((s, i) => {
+      setText(`#tpAmt${i}`, num(s.pct) ? fmt((num(s.pct) / 100) * d.commissionBase) : "—");
+    });
+    setText("#internalPoolLbl", fmt(d.internalPool));
+    const poolNote = $("app").querySelector("#poolNote");
+    if (poolNote) {
+      poolNote.innerHTML = d.thirdPartyTotal
+        ? `Third party share: <b>$${fmt(d.thirdPartyTotal)}</b> of $${fmt(d.commissionBase)} commission`
+        : "";
+      poolNote.style.display = d.thirdPartyTotal ? "" : "none";
+    }
+    const ss = $("app").querySelector(".splitStatus");
+    if (ss) {
+      ss.textContent = `Salesperson split: ${d.internalPctTotal.toFixed(2)}%` +
+        (d.internalPctTotal !== 0 ? (d.internalOk ? " ✓" : " — must equal 100%") : "");
+      ss.className = "splitStatus " + (d.internalPctTotal === 0 ? "" : d.internalOk ? "ok" : "bad");
+    }
+
+    // --- summary rail ---
     const dds = $("app").querySelectorAll(".railList dd");
     if (dds[0]) dds[0].textContent = "$" + fmt(d.netRental);
     if (dds[1]) dds[1].textContent = "$" + fmt(d.grossRental);
-    if (dds[2]) dds[2].textContent = d.totalArea ? fmt(d.totalArea)+" m²" : "—";
+    if (dds[2]) dds[2].textContent = d.totalArea ? fmt(d.totalArea) + " m²" : "—";
     if (dds[3]) dds[3].textContent = "$" + fmt(d.totalInvoice);
-    if (dds[4]) { dds[4].textContent = d.internalPctTotal.toFixed(0)+"%"; dds[4].className = d.internalPctTotal && !d.internalOk ? "bad" : ""; }
+    if (dds[4]) { dds[4].textContent = d.internalPctTotal.toFixed(0) + "%"; dds[4].className = d.internalPctTotal && !d.internalOk ? "bad" : ""; }
+
     const missing = validate(d);
     const st = $("app").querySelector(".railStatus");
-    if (st) { st.textContent = missing.length?`${missing.length} item${missing.length===1?"":"s"} outstanding`:"Ready to send"; st.className = "railStatus" + (missing.length?"":" ok"); }
+    if (st) {
+      st.textContent = missing.length ? `${missing.length} item${missing.length === 1 ? "" : "s"} outstanding` : "Ready to send";
+      st.className = "railStatus" + (missing.length ? "" : " ok");
+    }
   }
 
   function wireUploads() {
