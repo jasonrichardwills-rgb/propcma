@@ -29,6 +29,26 @@ const num = (v) => {
 };
 
 /**
+ * Convert an ISO (yyyy-mm-dd) or other parseable date to an Excel serial
+ * number — the number of days since 1899-12-30 (Excel's epoch, including
+ * its deliberate 1900 leap-year bug).
+ *
+ * Writing a serial + applying a date number format means Excel stores a
+ * REAL date rather than text. Text dates are ambiguous across locales
+ * (7/3/2026 is 7 March in NZ but 3 July in the US) and read back as raw
+ * numbers in downstream systems.
+ */
+function toExcelSerial(value) {
+  if (!value) return null;
+  const d = new Date(value);
+  if (isNaN(d.getTime())) return null;
+  // Use UTC parts so a timezone offset can't shift the calendar day.
+  const utc = Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate());
+  const epoch = Date.UTC(1899, 11, 30);
+  return Math.round((utc - epoch) / 86400000);
+}
+
+/**
  * Build the A–U row array for the Excel sheet from an invoiced deal.
  * brokerNames maps broker codes -> first names.
  *
@@ -59,7 +79,8 @@ export function toExcelRow(deal, newId, brokerNames = {}) {
     .map((code) => brokerNames[code] || code);
   const b = [0, 1, 2, 3].map((i) => brokerNamesList[i] || null);
 
-  const saleDate = sale.unconditionalDate || sale.dateOfAgreement || null;
+  const saleDateRaw = sale.unconditionalDate || sale.dateOfAgreement || null;
+  const saleDate = toExcelSerial(saleDateRaw);   // Excel serial, not text
 
   // Order MUST match columns A–U on "Summary All Years".
   return [
@@ -224,13 +245,18 @@ export async function appendToExcel(deal, newId, brokerNames = {}) {
     const targetAddress = `A${nextRow}:U${nextRow}`;
 
     // 3. Write the row.
+    //
+    // `numberFormat` is sent alongside the values so Excel treats column B
+    // as a real date (displaying dd/mm/yyyy) rather than showing the raw
+    // serial number. "General" leaves every other column as-is.
     const row = toExcelRow(deal, newId, brokerNames);
+    const numberFormat = row.map((_, i) => (i === 1 ? "dd/mm/yyyy" : "General"));
     const res = await fetch(
       `https://graph.microsoft.com/v1.0/drives/${drive.id}/items/${item.id}/workbook/worksheets/${encodeURIComponent(sheetName)}/range(address='${encodeURIComponent(targetAddress)}')`,
       {
         method: "PATCH",
         headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-        body: JSON.stringify({ values: [row] }),
+        body: JSON.stringify({ values: [row], numberFormat: [numberFormat] }),
       }
     );
     if (!res.ok) {
