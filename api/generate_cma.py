@@ -348,7 +348,7 @@ def draw_property_card(c, x, y, cw, ch, prop, api_key):
 
 
 # ── Comparable sales table (page 3+) ─────────────────────────
-from datetime import datetime
+from datetime import datetime, timedelta
 
 def fmt_full_date(s):
     """Format a sale date as 'Friday, 26 June 2026'. Falls back to raw string."""
@@ -513,6 +513,17 @@ def fmt_month_year(s):
     Falls back to a trimmed raw string (never a long overflowing one)."""
     if not s: return '—'
     s = str(s).strip()
+
+    # Excel date serial (days since 1899-12-30). Legacy spreadsheet rows
+    # store dates this way, e.g. 46223 -> 20 Jul 2026.
+    if s.isdigit() and 4 <= len(s) <= 5:
+        n = int(s)
+        if 20000 <= n <= 80000:          # ~1954 to ~2119: a plausible date
+            try:
+                return (datetime(1899, 12, 30) + timedelta(days=n)).strftime('%b %Y')
+            except (ValueError, OverflowError):
+                pass
+
     fmts = (
         '%A, %B %d, %Y',   # Friday, June 26, 2026
         '%A %B %d, %Y', '%B %d, %Y', '%b %d, %Y',
