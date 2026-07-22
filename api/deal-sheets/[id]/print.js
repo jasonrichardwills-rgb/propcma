@@ -17,6 +17,12 @@ const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) =>
 const money = (n) => n == null ? "—" :
   "$" + Number(n).toLocaleString("en-NZ", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const yn = (b) => b ? "Yes" : "No";
+const nzDate = (v) => {
+  if (!v) return "—";
+  const d = new Date(v);
+  if (isNaN(d.getTime())) return esc(String(v));
+  return d.toLocaleDateString("en-NZ", { day: "2-digit", month: "short", year: "numeric" });
+};
 const dash = (v) => (v === null || v === undefined || v === "") ? "—" : esc(v);
 
 export default async function handler(req, res) {
@@ -46,7 +52,8 @@ export default async function handler(req, res) {
     const { data: creator } = await supabase.from("app_users")
       .select("display_name, email").eq("oid", deal.created_by).maybeSingle();
 
-    const html = renderPrintable(deal, splits || [], attachments || [], brokers || [],
+    const render = deal.deal_type === "lease" ? renderLeasePrintable : renderPrintable;
+    const html = render(deal, splits || [], attachments || [], brokers || [],
       creator?.display_name || creator?.email || "");
     res.setHeader("Content-Type", "text/html; charset=utf-8");
     return res.status(200).send(html);
@@ -55,30 +62,7 @@ export default async function handler(req, res) {
   }
 }
 
-function renderPrintable(deal, splits, attachments, brokers, preparedBy) {
-  const f = deal.form || {};
-  const sale = f.sale || {};
-  const comm = f.comm || {};
-  const chk = f.checklist || {};
-  const nameOf = (code) => (brokers.find((b) => b.code === code) || {}).first_name || code;
-  const dealBrokers = (f.ownership?.salespeople || []).map(nameOf).join(", ");
-
-  const row = (label, value) => `<tr><th>${label}</th><td>${value}</td></tr>`;
-  const party = (p, title, solicitor) => !p?.name ? "" : `
-    <h3>${title}</h3>
-    <table class="kv">
-      ${row("Name", dash(p.name))}
-      ${row("Contact", dash(p.contactName))}
-      ${row("Phone", dash(p.phone))}
-      ${row("Email", dash(p.email))}
-      ${row("Postal address", [p.postalAddress, p.city, p.postcode, p.country].filter(Boolean).map(esc).join(", ") || "—")}
-      ${solicitor && p.solicitorName ? row("Solicitor", `${esc(p.solicitorName)}${p.solicitorFirm ? ", " + esc(p.solicitorFirm) : ""}${p.solicitorPhone ? " · " + esc(p.solicitorPhone) : ""}`) : ""}
-    </table>`;
-
-  return `<!DOCTYPE html>
-<html lang="en-NZ"><head><meta charset="utf-8" />
-<title>Deal Sheet — ${esc(deal.property_address || "")}</title>
-<style>
+const PRINT_CSS = `
   @page { size: A4; margin: 14mm; }
   * { box-sizing: border-box; }
   body { font-family: "Segoe UI", Arial, sans-serif; color: #1A2233; font-size: 11pt; margin: 0; }
@@ -110,7 +94,34 @@ function renderPrintable(deal, splits, attachments, brokers, preparedBy) {
            color: #66708A; font-size: 8.5pt; display: flex; justify-content: space-between; }
   .avoid { page-break-inside: avoid; }
   @media print { .noprint { display: none; } }
-</style></head>
+  table.grid td.lbl { color:#66708A; }
+  .sub2 { font-size:9pt; color:#66708A; margin:-2px 0 6px; }
+`;
+
+function renderPrintable(deal, splits, attachments, brokers, preparedBy) {
+  const f = deal.form || {};
+  const sale = f.sale || {};
+  const comm = f.comm || {};
+  const chk = f.checklist || {};
+  const nameOf = (code) => (brokers.find((b) => b.code === code) || {}).first_name || code;
+  const dealBrokers = (f.ownership?.salespeople || []).map(nameOf).join(", ");
+
+  const row = (label, value) => `<tr><th>${label}</th><td>${value}</td></tr>`;
+  const party = (p, title, solicitor) => !p?.name ? "" : `
+    <h3>${title}</h3>
+    <table class="kv">
+      ${row("Name", dash(p.name))}
+      ${row("Contact", dash(p.contactName))}
+      ${row("Phone", dash(p.phone))}
+      ${row("Email", dash(p.email))}
+      ${row("Postal address", [p.postalAddress, p.city, p.postcode, p.country].filter(Boolean).map(esc).join(", ") || "—")}
+      ${solicitor && p.solicitorName ? row("Solicitor", `${esc(p.solicitorName)}${p.solicitorFirm ? ", " + esc(p.solicitorFirm) : ""}${p.solicitorPhone ? " · " + esc(p.solicitorPhone) : ""}`) : ""}
+    </table>`;
+
+  return `<!DOCTYPE html>
+<html lang="en-NZ"><head><meta charset="utf-8" />
+<title>Deal Sheet — ${esc(deal.property_address || "")}</title>
+<style>${PRINT_CSS}</style></head>
 <body onload="window.print()">
 <header>
   <div><h1>Deal Sheet — Sales Record</h1>
@@ -164,7 +175,7 @@ ${deal.deposit_to_trust ? `
 <h2>Trust deposit</h2>
 <table class="kv">
   ${row("Amount", money(f.deposit?.amount))}
-  ${row("Date received", dash(f.deposit?.dateReceived))}
+  ${row("Date received", nzDate(f.deposit?.dateReceived))}
   ${row("Trust receipt no.", dash(f.deposit?.receiptNo))}
   ${row("Early release required", yn(f.deposit?.earlyRelease))}
 </table>` : ""}
@@ -218,6 +229,203 @@ ${attachments.length ? `<h3>Attached documents</h3><ul class="checks">${
 
 <footer>
   <span>Deal sheet ${esc(deal.id)}</span>
+  <span>Printed ${new Date().toLocaleString("en-NZ")}</span>
+</footer>
+</body></html>`;
+}
+
+/**
+ * Printable Leasing Record. Same visual language as the sales sheet
+ * (shared PRINT_CSS) but laid out around the lease: lessor/lessee,
+ * lease terms, the rental schedule, and the leasing checklist.
+ */
+function renderLeasePrintable(deal, splits, attachments, brokers, preparedBy) {
+  const f = deal.form || {};
+  const lease = f.lease || {};
+  const rental = f.rental || {};
+  const comm = f.comm || {};
+  const chk = f.checklist || {};
+  const nameOf = (code) => (brokers.find((b) => b.code === code) || {}).first_name || code;
+  const dealBrokers = (f.ownership?.salespeople || []).map(nameOf).join(", ");
+
+  const row = (label, value) => `<tr><th>${label}</th><td>${value}</td></tr>`;
+  const party = (p, title, solicitor) => !p?.name ? "" : `
+    <h3>${title}</h3>
+    <table class="kv">
+      ${row("Name", dash(p.name))}
+      ${row("Contact", dash(p.contactName))}
+      ${row("Phone", dash(p.phone))}
+      ${row("Email", dash(p.email))}
+      ${row("Postal address", [p.postalAddress, p.city, p.postcode, p.country].filter(Boolean).map(esc).join(", ") || "—")}
+      ${solicitor && p.solicitorName ? row("Solicitor", `${esc(p.solicitorName)}${p.solicitorFirm ? ", " + esc(p.solicitorFirm) : ""}${p.solicitorPhone ? " · " + esc(p.solicitorPhone) : ""}`) : ""}
+    </table>`;
+
+  // ---- rental schedule ----
+  const LINES = [
+    { key:"retail",    label:"Retail",         unit:"sqm"  },
+    { key:"office",    label:"Office",         unit:"sqm"  },
+    { key:"warehouse", label:"Warehouse",      unit:"sqm"  },
+    { key:"canopy",    label:"Canopy / Deck",  unit:"sqm"  },
+    { key:"naming",    label:"Naming Rights",  unit:null   },
+    { key:"carparks",  label:"Carparks",       unit:"cpks" },
+    { key:"other1",    label:"Other",          unit:null   },
+    { key:"other2",    label:"Other",          unit:null   },
+  ];
+  const n = (v) => { const x = parseFloat(String(v ?? "").replace(/[$,\s]/g, "")); return isNaN(x) ? 0 : x; };
+
+  let netRental = 0;
+  const rentalRows = LINES.map((l) => {
+    const line = rental[l.key] || {};
+    let total;
+    if (l.key === "carparks") total = n(line.qty) * n(line.rate) * 52;
+    else if (l.unit === "sqm") total = n(line.qty) * n(line.rate);
+    else total = n(line.total);
+    if (l.unit && line.total !== "" && line.total != null) total = n(line.total);
+    if (!n(line.qty) && !n(line.rate) && !total) return "";   // skip empty lines
+    netRental += total;
+    return `<tr>
+      <td class="lbl">${l.label}</td>
+      <td class="r">${line.qty ? esc(line.qty) + (l.unit === "cpks" ? "" : " m²") : "—"}</td>
+      <td class="r">${line.rate ? money(line.rate) + (l.key === "carparks" ? " pppw" : " /m²") : "—"}</td>
+      <td class="r">${money(total)}</td></tr>`;
+  }).join("");
+
+  const opex = n(rental.opex), rates = n(rental.rates);
+  const grossRental = netRental + opex + rates;
+
+  const adminFee = comm.adminFee ? 500 : 0;
+  const totalInvoice = n(comm.fee) + n(comm.otherFee) + adminFee
+    + n(comm.recoverMarketing) + n(comm.recoverOther);
+
+  const rorText = lease.rorTimes
+    ? `${esc(lease.rorTimes)} × ${dash(lease.rorYears)} year${n(lease.rorYears) === 1 ? "" : "s"}`
+    : "—";
+
+  return `<!DOCTYPE html>
+<html lang="en-NZ"><head><meta charset="utf-8" />
+<title>Deal Sheet (Lease) — ${esc(deal.property_address || "")}</title>
+<style>${PRINT_CSS}</style></head>
+<body onload="window.print()">
+<header>
+  <div><h1>Deal Sheet — Leasing Record</h1>
+    <div class="sub">South Island Commercial (2004) Limited · Colliers</div></div>
+  <div class="nums">
+    <div>File No. <b>${dash(deal.file_no)}</b></div>
+    <div>Deal No. <b>${dash(deal.deal_no)}</b></div>
+    <div class="sub">Status: ${esc(deal.status)}</div>
+  </div>
+</header>
+
+<h2>Deal ownership</h2>
+<table class="kv">
+  ${row("Salespeople", dash(dealBrokers))}
+  ${row("Division", dash(f.ownership?.division))}
+  ${row("Office", dash(f.ownership?.office))}
+</table>
+
+<h2>Property</h2>
+<table class="kv">
+  ${row("Address", dash(deal.property_address || f.property?.address))}
+  ${row("Building name", dash(f.property?.buildingName))}
+  ${row("Property type", dash(f.property?.propertyType))}
+  ${row("Level / Unit", [f.property?.level, f.property?.unit].filter(Boolean).map(esc).join(" / ") || "—")}
+  ${row("City", dash(f.property?.city))}
+</table>
+
+<div class="two avoid">
+  <div>${party(f.lessor, "Lessor", true)}
+    ${f.lessor?.parentCompany ? `<table class="kv">${row("Parent company", dash(f.lessor.parentCompany))}</table>` : ""}</div>
+  <div>${party(f.lessee, "Lessee", true)}
+    ${f.invoiceToLessee ? `<p class="sub2">Invoice to be raised to the Lessee.</p>` : ""}</div>
+</div>
+${f.billingDifferent ? party(f.billing, "Billing entity", false) : ""}
+
+<h2>Lease details</h2>
+<table class="kv">
+  ${row("Date of agreement", nzDate(lease.dateOfAgreement))}
+  ${row("Unconditional date", nzDate(lease.unconditionalDate))}
+  ${row("Occupancy date", nzDate(lease.occupancyDate))}
+  ${row("Commencement date", nzDate(lease.commencementDate))}
+  ${row("Expiry date", nzDate(lease.expiryDate))}
+  ${row("Lease term", lease.termYears ? esc(lease.termYears) + " years" : "—")}
+  ${row("Rights of renewal", rorText)}
+  ${row("Rent review period", dash(lease.rentReviewPeriod))}
+  ${row("Deal type", dash(lease.dealType))}
+  ${row("Lease basis", dash(lease.leaseBasis))}
+  ${row("Incentives", dash(lease.incentives))}
+</table>
+
+<h2 class="avoid">Rental schedule</h2>
+<table class="grid avoid">
+  <thead><tr><th>Component</th><th class="r">Area / Number</th><th class="r">Rate</th><th class="r">Total p.a.</th></tr></thead>
+  <tbody>
+    ${rentalRows || `<tr><td colspan="4">—</td></tr>`}
+    <tr><td class="lbl" colspan="3"><strong>Total Net Rental (excl GST)</strong></td>
+      <td class="r"><strong>${money(netRental)}</strong></td></tr>
+    ${opex ? `<tr><td class="lbl" colspan="3">Plus Opex</td><td class="r">${money(opex)}</td></tr>` : ""}
+    ${rates ? `<tr><td class="lbl" colspan="3">Plus Rates</td><td class="r">${money(rates)}</td></tr>` : ""}
+    <tr class="total"><td colspan="3">Total Gross Rental (excl GST) p.a.</td>
+      <td class="r">${money(grossRental)}</td></tr>
+  </tbody>
+</table>
+
+${deal.deposit_to_trust ? `
+<h2>Trust deposit</h2>
+<table class="kv">
+  ${row("Amount", money(f.deposit?.amount))}
+  ${row("Date received", nzDate(f.deposit?.dateReceived))}
+  ${row("Trust receipt no.", dash(f.deposit?.receiptNo))}
+  ${row("Early release required", yn(f.deposit?.earlyRelease))}
+</table>` : ""}
+
+<h2 class="avoid">Commission</h2>
+<table class="grid avoid">
+  <thead><tr><th>Item</th><th>Description</th><th class="r">Amount</th></tr></thead>
+  <tbody>
+    ${comm.fee ? `<tr><td>Commission (per scale of fees)</td><td></td><td class="r">${money(comm.fee)}</td></tr>` : ""}
+    ${comm.otherFee ? `<tr><td>Other / consultancy</td><td>${dash(comm.otherDesc)}</td><td class="r">${money(comm.otherFee)}</td></tr>` : ""}
+    ${adminFee ? `<tr><td>Administration fee</td><td></td><td class="r">${money(500)}</td></tr>` : ""}
+    ${comm.recoverMarketing ? `<tr><td>Recover marketing costs</td><td></td><td class="r">${money(comm.recoverMarketing)}</td></tr>` : ""}
+    ${comm.recoverOther ? `<tr><td>Recover other costs</td><td>${dash(comm.recoverOtherDesc)}</td><td class="r">${money(comm.recoverOther)}</td></tr>` : ""}
+    <tr class="total"><td colspan="2">Total to invoice (excl GST)</td><td class="r">${money(totalInvoice)}</td></tr>
+  </tbody>
+</table>
+
+<h2 class="avoid">Commission split</h2>
+<table class="grid avoid">
+  <thead><tr><th>Party</th><th class="r">%</th><th class="r">Amount</th></tr></thead>
+  <tbody>${splits.map((s) => `<tr><td>${esc(s.party_name)}${s.party_type === "third_party" ? " <em>(third party)</em>" : ""}</td>
+    <td class="r">${s.split_pct}%</td><td class="r">${money(s.split_amount)}</td></tr>`).join("") ||
+    `<tr><td colspan="3">—</td></tr>`}</tbody>
+</table>
+
+<h2 class="avoid">Tenant source</h2>
+<table class="kv avoid">
+  ${row("Source", dash(f.tenantSource === "Other" ? f.tenantSourceOther : f.tenantSource))}
+  ${f.tenantSource === "Referral" ? row("Referral from", dash(f.tenantReferralWho)) : ""}
+</table>
+
+<h2 class="avoid">Mandatory checklist</h2>
+<ul class="checks avoid">
+  <li class="${chk.agencyAgreement ? "" : "no"}">Signed agency agreement</li>
+  <li class="${chk.unconditionalConfirmation ? "" : "no"}">Confirmation of unconditional</li>
+  <li class="${chk.leaseValueConfirmation ? "" : "no"}">Confirmation of lease value</li>
+  <li class="${chk.marketingReport ? "" : "no"}">Marketing campaign report</li>
+  <li class="${chk.amlComplete ? "" : "no"}">AML complete</li>
+  <li class="${chk.leaseDeed ? "" : "no"}">Lease deed</li>
+  ${deal.deposit_to_trust ? `<li class="${chk.appraisals ? "" : "no"}">Appraisals (trust deal)</li>` : ""}
+</ul>
+${attachments.length ? `<h3>Attached documents</h3><ul class="checks">${
+  attachments.map((a) => `<li>${esc(a.file_name)}</li>`).join("")}</ul>` : ""}
+
+<h2 class="avoid">Sign-off</h2>
+<table class="kv avoid">
+  ${row("Prepared by", dash(preparedBy))}
+  ${row("Submitted", deal.submitted_at ? new Date(deal.submitted_at).toLocaleString("en-NZ") : "—")}
+</table>
+
+<footer>
+  <span>Leasing deal sheet ${esc(deal.id)}</span>
   <span>Printed ${new Date().toLocaleString("en-NZ")}</span>
 </footer>
 </body></html>`;
