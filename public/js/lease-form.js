@@ -196,10 +196,9 @@
     const missing = validate(d);
     const f = state.f;
 
-    const brokerChips = BROKERS.map(b => {
-      const on = f.ownership.salespeople.includes(b.code);
-      return `<button type="button" class="chip ${on?"on":""}" data-broker="${b.code}">${esc(b.name)}</button>`;
-    }).join("");
+    const brokerChips = BROKERS.map((b) => `<label class="brokerChip ${f.ownership.salespeople.includes(b.code)?"on":""}">
+      <input type="checkbox" class="brokerBox" value="${b.code}" ${f.ownership.salespeople.includes(b.code)?"checked":""} />
+      <span>${esc(b.name)}</span></label>`).join("");
 
     // Rental schedule rows
     const rentalRows = RENTAL_LINES.map(l => {
@@ -214,8 +213,13 @@
       </tr>`;
     }).join("");
 
+    // Split dropdowns offer only the brokers chosen in section 1.
+    const dealBrokers = BROKERS.filter((b) => f.ownership.salespeople.includes(b.code));
     const splitRows = f.splits.map((s,i) => `<tr>
-      <td><input class="cell" data-path="splits.${i}.person" value="${esc(s.person)}" placeholder="Name" /></td>
+      <td><select class="cell" data-path="splits.${i}.person">
+        <option value="">${dealBrokers.length?"Select…":"Add salespeople in section 1"}</option>
+        ${dealBrokers.map((b) => `<option value="${esc(b.name)}" ${s.person===b.name?"selected":""}>${esc(b.name)}</option>`).join("")}
+        </select></td>
       <td><input class="cell" data-recalc data-path="splits.${i}.pct" value="${esc(s.pct)}" placeholder="%" /></td>
       <td class="r mono" id="splitAmt${i}">${num(s.pct)?fmt((num(s.pct)/100)*d.internalPool):"—"}</td></tr>`).join("");
 
@@ -242,7 +246,11 @@
       <div class="layout">
         <div class="col">
           ${section("1","Deal ownership","Select every broker on this deal.",`
-            <div class="chips">${brokerChips}</div>
+            <div class="brokerPick">
+              <span class="lbl">Salesperson<em class="req">*</em>
+                <span class="dim">${f.ownership.salespeople.length} selected</span></span>
+              <div class="brokerGrid">${brokerChips}</div>
+            </div>
             <div class="grid" style="margin-top:12px">
               ${sel("ownership.division","Division",DIVISIONS)}
               ${txt("ownership.office","Office")}</div>`)}
@@ -382,13 +390,20 @@
       }
     });
 
-    $("app").querySelectorAll("[data-broker]").forEach((b) => {
-      b.onclick = () => {
-        const code = b.dataset.broker;
+    $("app").querySelectorAll(".brokerBox").forEach((box) => {
+      box.onchange = () => {
+        const code = box.value;
         const list = state.f.ownership.salespeople;
-        const i = list.indexOf(code);
-        if (i >= 0) list.splice(i,1); else list.push(code);
-        scheduleAutosave(); render();
+        if (box.checked) {
+          if (!list.includes(code)) list.push(code);
+        } else {
+          state.f.ownership.salespeople = list.filter((c) => c !== code);
+          // Clear any split row assigned to a broker no longer on the deal.
+          const name = (BROKERS.find((b) => b.code === code) || {}).name;
+          state.f.splits.forEach((s) => { if (s.person === name) s.person = ""; });
+        }
+        scheduleAutosave();
+        render();
       };
     });
 
