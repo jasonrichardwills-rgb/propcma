@@ -133,20 +133,39 @@ async function invoice(req, res, deal) {
     "Invoice raised — commission approved"
   );
 
+  // #10 — Confidential / Private Sale deals are excluded from PropCMA and
+  // the Excel comparables sheet entirely. The invoice still processes; we
+  // simply don't publish the deal as a market comparable.
+  const isConfidential = !!(updated.confidential || updated.form?.confidential);
+
+  if (isConfidential) {
+    await supabase.from("deal_sheet_events").insert({
+      deal_id: deal.id,
+      actor: user.oid,
+      from_status: "invoiced",
+      to_status: "invoiced",
+      note: "Marked Confidential / Private Sale — excluded from PropCMA and Excel comparables",
+    });
+  }
+
   // Write the completed sale into PropCMA's comparables data as a NEW
   // row. Deliberately non-fatal: the deal is already invoiced, and a
   // failed comparable write must not roll that back or block accounts.
   // The outcome is recorded in the audit trail either way.
-  const pushed = await pushToPropCMA(updated);
-  await supabase.from("deal_sheet_events").insert({
-    deal_id: deal.id,
-    actor: user.oid,
-    from_status: "invoiced",
-    to_status: "invoiced",
-    note: pushed.ok
-      ? `Added to PropCMA comparables (properties id ${pushed.id})`
-      : `PropCMA comparable write FAILED — needs manual entry: ${pushed.error}`,
-  });
+  const pushed = isConfidential
+    ? { ok: false, skipped: true }
+    : await pushToPropCMA(updated);
+  if (!isConfidential) {
+    await supabase.from("deal_sheet_events").insert({
+      deal_id: deal.id,
+      actor: user.oid,
+      from_status: "invoiced",
+      to_status: "invoiced",
+      note: pushed.ok
+        ? `Added to PropCMA comparables (properties id ${pushed.id})`
+        : `PropCMA comparable write FAILED — needs manual entry: ${pushed.error}`,
+    });
+  }
 
   if (pushed.ok) {
     await supabase.from("deal_sheets")
@@ -157,7 +176,7 @@ async function invoice(req, res, deal) {
   // Reuses the same ds_ id and broker names so Excel and Supabase match.
   // Non-fatal for the same reason; recorded in the audit trail.
   let excelResult = { ok: false, skipped: true };
-  if (pushed.ok) {
+  if (pushed.ok && !isConfidential) {
     const { data: brokerRows } = await supabase.from("brokers").select("code, first_name");
     const brokerNames = Object.fromEntries((brokerRows || []).map((b) => [b.code, b.first_name]));
     excelResult = await appendToExcel(updated, pushed.id, brokerNames);
