@@ -33,7 +33,7 @@ export const RENTAL_LINES = [
  *   - Carparks: number × rate per park per week × 52
  *   - Naming rights / Other: a total is entered directly
  *   Total Net Rental = sum of the above
- *   Total Gross Rental = Net + Opex + Rates
+ *   Total Gross Rental = Net + Opex
  *
  * Commission (manual entry — no percentage calculation):
  *   Total invoiced = commission fee + other/consultancy + admin fee
@@ -67,11 +67,10 @@ export function computeLeaseDerived(form) {
 
   const calcNet = Object.values(lineTotals).reduce((a, b) => a + b, 0);
   const opex = num(r.opex);
-  const rates = num(r.rates);
   // Manual overrides win over the calculated figures when present.
   const ov = form.rentalOverride || {};
   const netRental = ov.net !== "" && ov.net != null ? num(ov.net) : calcNet;
-  const grossRental = ov.gross !== "" && ov.gross != null ? num(ov.gross) : netRental + opex + rates;
+  const grossRental = ov.gross !== "" && ov.gross != null ? num(ov.gross) : netRental + opex;
 
   // ---- commission (manual amounts) ----
   const adminFee = form.comm?.adminFee ? 500 : 0;
@@ -128,7 +127,7 @@ export function computeLeaseDerived(form) {
     lineTotals,
     netRental: +netRental.toFixed(2),
     calcNet: +calcNet.toFixed(2),
-    opex, rates,
+    opex,
     grossRental: +grossRental.toFixed(2),
     totalArea,
     adminFee,
