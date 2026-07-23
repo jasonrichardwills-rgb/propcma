@@ -293,8 +293,8 @@ function renderLeasePrintable(deal, splits, attachments, brokers, preparedBy) {
       <td class="r">${money(total)}</td></tr>`;
   }).join("");
 
-  const opex = n(rental.opex), rates = n(rental.rates);
-  const grossRental = netRental + opex + rates;
+  const opex = n(rental.opex);
+  const grossRental = netRental + opex;
 
   const adminFee = comm.adminFee ? 500 : 0;
   const totalInvoice = n(comm.fee) + n(comm.otherFee) + adminFee
@@ -366,7 +366,6 @@ ${f.billingDifferent ? party(f.billing, "Billing entity", false) : ""}
     <tr><td class="lbl" colspan="3"><strong>Total Net Rental (excl GST)</strong></td>
       <td class="r"><strong>${money(netRental)}</strong></td></tr>
     ${opex ? `<tr><td class="lbl" colspan="3">Plus Opex</td><td class="r">${money(opex)}</td></tr>` : ""}
-    ${rates ? `<tr><td class="lbl" colspan="3">Plus Rates</td><td class="r">${money(rates)}</td></tr>` : ""}
     <tr class="total"><td colspan="3">Total Gross Rental (excl GST) p.a.</td>
       <td class="r">${money(grossRental)}</td></tr>
   </tbody>
