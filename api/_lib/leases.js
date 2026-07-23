@@ -153,7 +153,7 @@ export function toLeaseRow(form, derived) {
     annual_net_rent: derived.netRental || null,
     wale_years: null,
     deposit_to_trust: !!form.depositToTrust,
-    confidential: !!form.press?.confidential,
+    confidential: !!form.confidential,
     property_id: form.propertyId || null,
     form,
   };
