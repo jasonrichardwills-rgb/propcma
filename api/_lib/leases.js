@@ -16,6 +16,8 @@ export const RENTAL_LINES = [
   { key: "retail",    label: "Retail",         unit: "sqm" },
   { key: "office",    label: "Office",         unit: "sqm" },
   { key: "warehouse", label: "Warehouse",      unit: "sqm" },
+  { key: "industrial",label: "Industrial",     unit: "sqm" },
+  { key: "yard",      label: "Yard",           unit: "sqm" },
   { key: "canopy",    label: "Canopy / Deck",  unit: "sqm" },
   { key: "naming",    label: "Naming Rights",  unit: null  },  // total only
   { key: "carparks",  label: "Carparks",       unit: "cpks" }, // rate is per park per week
@@ -63,10 +65,13 @@ export function computeLeaseDerived(form) {
     }
   }
 
-  const netRental = Object.values(lineTotals).reduce((a, b) => a + b, 0);
+  const calcNet = Object.values(lineTotals).reduce((a, b) => a + b, 0);
   const opex = num(r.opex);
   const rates = num(r.rates);
-  const grossRental = netRental + opex + rates;
+  // Manual overrides win over the calculated figures when present.
+  const ov = form.rentalOverride || {};
+  const netRental = ov.net !== "" && ov.net != null ? num(ov.net) : calcNet;
+  const grossRental = ov.gross !== "" && ov.gross != null ? num(ov.gross) : netRental + opex + rates;
 
   // ---- commission (manual amounts) ----
   const adminFee = form.comm?.adminFee ? 500 : 0;
@@ -81,13 +86,16 @@ export function computeLeaseDerived(form) {
   // ---- splits (Option B, identical to sales) ----
   const commissionBase = totalInvoice - adminFee;
 
+  // A split can be a fixed $ amount OR a percentage. Fixed wins when set.
+  const splitAmt = (s, base) => num(s.fixed) > 0 ? num(s.fixed) : +((num(s.pct) / 100) * base).toFixed(2);
+
   const thirdPartyRows = (form.thirdParty || [])
-    .filter((s) => num(s.pct) > 0)
+    .filter((s) => num(s.pct) > 0 || num(s.fixed) > 0)
     .map((s) => ({
       party_type: "third_party",
       party_name: s.name || "(unnamed)",
       split_pct: num(s.pct),
-      split_amount: +((num(s.pct) / 100) * commissionBase).toFixed(2),
+      split_amount: splitAmt(s, commissionBase),
     }));
 
   const thirdPartyTotal = thirdPartyRows.reduce((a, s) => a + s.split_amount, 0);
@@ -95,15 +103,20 @@ export function computeLeaseDerived(form) {
   const internalPool = +(totalInvoice - thirdPartyTotal).toFixed(2);
 
   const internalRows = (form.splits || [])
-    .filter((s) => num(s.pct) > 0)
+    .filter((s) => num(s.pct) > 0 || num(s.fixed) > 0)
     .map((s) => ({
       party_type: "salesperson",
       party_name: s.person || "(unnamed)",
       split_pct: num(s.pct),
-      split_amount: +((num(s.pct) / 100) * internalPool).toFixed(2),
+      split_amount: splitAmt(s, internalPool),
     }));
 
   const internalPctTotal = internalRows.reduce((a, s) => a + s.split_pct, 0);
+  const internalPaid = internalRows.reduce((a, s) => a + s.split_amount, 0);
+  // With fixed amounts in the mix, validate that the paid-out internal
+  // total matches the pool, rather than requiring the %s to sum to 100.
+  const internalOk = internalRows.length === 0
+    || Math.abs(internalPaid - internalPool) < 1;
 
   // Total area across the sqm lines — used for rate per sqm on the
   // PropCMA comparable.
@@ -114,6 +127,7 @@ export function computeLeaseDerived(form) {
   return {
     lineTotals,
     netRental: +netRental.toFixed(2),
+    calcNet: +calcNet.toFixed(2),
     opex, rates,
     grossRental: +grossRental.toFixed(2),
     totalArea,
@@ -124,6 +138,8 @@ export function computeLeaseDerived(form) {
     thirdPartyPctTotal,
     internalPool,
     internalPctTotal,
+    internalPaid: +internalPaid.toFixed(2),
+    internalOk,
     splits: [...internalRows, ...thirdPartyRows],
   };
 }
@@ -174,11 +190,11 @@ export function validateLeaseForSubmit(form, derived) {
   if (!l.termYears) missing.push("Lease term");
   if (!derived.grossRental) missing.push("Rental schedule");
   if (!derived.totalInvoice) missing.push("Commission amount");
-  if (derived.internalPctTotal === 0) missing.push("Commission split");
-  else if (Math.abs(derived.internalPctTotal - 100) > 0.01)
-    missing.push("Salesperson split must total 100%");
-  if (derived.thirdPartyPctTotal >= 100)
-    missing.push("Third-party share must be under 100% of commission");
+  if (derived.internalPaid === 0) missing.push("Commission split");
+  else if (!derived.internalOk)
+    missing.push("Salesperson split must balance to the pool");
+  if (derived.thirdPartyTotal >= derived.totalInvoice)
+    missing.push("Third-party share can't exceed the commission");
   if (!form.tenantSource) missing.push("Tenant source");
 
   const c = form.checklist || {};
