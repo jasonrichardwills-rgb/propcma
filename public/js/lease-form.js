@@ -28,7 +28,7 @@
 
   const emptyRental = () => {
     const r = {};
-    RENTAL_LINES.forEach(l => { r[l.key] = { qty:"", rate:"", total:"" }; });
+    RENTAL_LINES.forEach(l => { r[l.key] = { qty:"", rate:"", total:"", desc:"" }; });
     r.opex = ""; r.rates = "";
     return r;
   };
@@ -236,6 +236,16 @@
       const line = f.rental[l.key] || {};
       const calc = d.lineTotals[l.key];
       const showCalc = calc ? fmt(calc) : "";
+      const isOther = l.key === "other1" || l.key === "other2";
+      if (isOther) {
+        // "Other" lines: a description spanning the area+rate columns,
+        // then a manual total.
+        return `<tr>
+          <td>${l.label}</td>
+          <td colspan="2"><input class="cell" data-path="rental.${l.key}.desc" value="${esc(line.desc)}" placeholder="Description (e.g. signage, storage)" /></td>
+          <td class="r"><input class="cell r" data-recalc data-path="rental.${l.key}.total" value="${esc(line.total)}" placeholder="0.00" /></td>
+        </tr>`;
+      }
       return `<tr>
         <td>${l.label}</td>
         <td>${l.unit ? `<input class="cell" data-recalc data-path="rental.${l.key}.qty" value="${esc(line.qty)}" placeholder="${l.unit}" />` : ""}</td>
