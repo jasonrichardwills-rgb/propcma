@@ -289,3 +289,11 @@ tfoot td{border-top:2px solid var(--navy);border-bottom:none;font-weight:700;pad
 .rentalTbl td:first-child{white-space:nowrap;color:var(--ink);font-weight:500;}
 .rentalTbl tfoot tr.sub td{border-top:1px solid var(--line);font-weight:600;}
 .rentalTbl tfoot tr.total td{border-top:2px solid var(--navy);font-weight:700;}
+
+/* ---------- lease form additions ---------- */
+.depositWarn{background:#FEE2E2;border:1px solid #FCA5A5;color:#991B1B;font-weight:700;
+  font-size:12.5px;padding:9px 12px;border-radius:8px;margin:10px 0;}
+.depositWarn.hidden{display:none;}
+.depositWarn b{font-weight:800;}
+.confidentialRow{background:#FFF7ED;border:1px solid #FED7AA;border-radius:8px;padding:10px 12px;}
+.rentalTbl input.cell.r.mono{font-weight:700;text-align:right;}
