@@ -29,7 +29,7 @@
   const emptyRental = () => {
     const r = {};
     RENTAL_LINES.forEach(l => { r[l.key] = { qty:"", rate:"", total:"", desc:"" }; });
-    r.opex = ""; r.rates = "";
+    r.opex = "";
     return r;
   };
 
@@ -98,10 +98,10 @@
     });
 
     const calcNet = Object.values(lineTotals).reduce((a,b) => a+b, 0);
-    const opex = num(r.opex), rates = num(r.rates);
+    const opex = num(r.opex);
     // Manual overrides win over the calculated figures when present.
     const netRental = f.rentalOverride.net !== "" ? num(f.rentalOverride.net) : calcNet;
-    const calcGross = netRental + opex + rates;
+    const calcGross = netRental + opex;
     const grossRental = f.rentalOverride.gross !== "" ? num(f.rentalOverride.gross) : calcGross;
     const totalArea = RENTAL_LINES.filter(l => l.unit === "sqm")
       .reduce((a,l) => a + num((r[l.key]||{}).qty), 0);
@@ -130,7 +130,7 @@
     const depositShort = f.depositToTrust && depositAmount > 0 && depositAmount < totalInvoice;
     const depositGap = depositShort ? totalInvoice - depositAmount : 0;
 
-    return { lineTotals, netRental, calcNet, opex, rates, grossRental, calcGross, totalArea,
+    return { lineTotals, netRental, calcNet, opex, grossRental, calcGross, totalArea,
              adminFee, totalInvoice, commissionBase, thirdPartyPctTotal,
              thirdPartyTotal, internalPool, internalPctTotal, internalPaid, internalOk,
              tpAmount, depositAmount, depositShort, depositGap };
@@ -347,7 +347,6 @@
                 <tr class="sub"><td colspan="3">Total Net Rental (excl GST)</td>
                   <td class="r"><input class="cell r mono" data-recalc data-path="rentalOverride.net" value="${esc(f.rentalOverride.net)}" placeholder="${fmt(d.calcNet)}" id="netRentalCell" /></td></tr>
                 <tr><td colspan="3">Plus Opex</td><td class="r"><input class="cell r" data-recalc data-path="rental.opex" value="${esc(f.rental.opex)}" placeholder="0.00" /></td></tr>
-                <tr><td colspan="3">Plus Rates</td><td class="r"><input class="cell r" data-recalc data-path="rental.rates" value="${esc(f.rental.rates)}" placeholder="0.00" /></td></tr>
                 <tr class="total"><td colspan="3">Total Gross Rental (excl GST) p.a.</td>
                   <td class="r"><input class="cell r mono" data-recalc data-path="rentalOverride.gross" value="${esc(f.rentalOverride.gross)}" placeholder="${fmt(d.calcGross)}" id="grossRentalCell" /></td></tr>
               </tfoot></table>
