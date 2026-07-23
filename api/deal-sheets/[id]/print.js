@@ -276,6 +276,7 @@ function renderLeasePrintable(deal, splits, attachments, brokers, preparedBy) {
   let netRental = 0;
   const rentalRows = LINES.map((l) => {
     const line = rental[l.key] || {};
+    const isOther = l.key === "other1" || l.key === "other2";
     let total;
     if (l.key === "carparks") total = n(line.qty) * n(line.rate) * 52;
     else if (l.unit === "sqm") total = n(line.qty) * n(line.rate);
@@ -283,8 +284,10 @@ function renderLeasePrintable(deal, splits, attachments, brokers, preparedBy) {
     if (l.unit && line.total !== "" && line.total != null) total = n(line.total);
     if (!n(line.qty) && !n(line.rate) && !total) return "";   // skip empty lines
     netRental += total;
+    // "Other" lines show their description instead of the generic label.
+    const label = isOther && line.desc ? esc(line.desc) : l.label;
     return `<tr>
-      <td class="lbl">${l.label}</td>
+      <td class="lbl">${label}</td>
       <td class="r">${line.qty ? esc(line.qty) + (l.unit === "cpks" ? "" : " m²") : "—"}</td>
       <td class="r">${line.rate ? money(line.rate) + (l.key === "carparks" ? " pppw" : " /m²") : "—"}</td>
       <td class="r">${money(total)}</td></tr>`;
